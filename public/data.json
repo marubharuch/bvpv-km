@@ -1,0 +1,64 @@
+{
+  "register": {
+    "reg001": {
+      "caseReceivedDate": "2026-01-05",
+      "branch": "Ahmedabad",
+      "applicantName": "Ravi Patel",
+      "contact": "9876543210"
+    },
+    "reg002": {
+      "caseReceivedDate": "2026-01-08",
+      "branch": "Surat",
+      "applicantName": "Neha Shah",
+      "contact": "9825012345"
+    },
+    "reg003": {
+      "caseReceivedDate": "2026-01-10",
+      "branch": "Rajkot",
+      "applicantName": "Amit Joshi",
+      "contact": "9898765432"
+    },
+    "reg004": {
+      "caseReceivedDate": "2026-01-12",
+      "branch": "Vadodara",
+      "applicantName": "Priya Mehta",
+      "contact": "9811122233"
+    },
+    "reg005": {
+      "caseReceivedDate": "2026-01-15",
+      "branch": "Bhavnagar",
+      "applicantName": "Kunal Desai",
+      "contact": "9909988776"
+    },
+    "reg006": {
+      "caseReceivedDate": "2026-01-18",
+      "branch": "Gandhinagar",
+      "applicantName": "Sneha Trivedi",
+      "contact": "9870011223"
+    },
+    "reg007": {
+      "caseReceivedDate": "2026-01-20",
+      "branch": "Jamnagar",
+      "applicantName": "Harsh Vora",
+      "contact": "9922233344"
+    },
+    "reg008": {
+      "caseReceivedDate": "2026-01-22",
+      "branch": "Junagadh",
+      "applicantName": "Mansi Dave",
+      "contact": "9865544332"
+    },
+    "reg009": {
+      "caseReceivedDate": "2026-01-25",
+      "branch": "Anand",
+      "applicantName": "Dhruv Modi",
+      "contact": "9810098765"
+    },
+    "reg010": {
+      "caseReceivedDate": "2026-01-28",
+      "branch": "Mehsana",
+      "applicantName": "Pooja Soni",
+      "contact": "9898989898"
+    }
+  }
+}

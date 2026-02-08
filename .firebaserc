@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "bvpv-km",
+    "kedavni": "bvpv-km"
+  },
+  "targets": {},
+  "etags": {}
+}
