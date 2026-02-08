@@ -84,5 +84,5 @@ export const submitStudentRegistration = async (student, editId = null) => {
 
   await clearStudentDraft();
 
-  return { mode: "new", familyPin };
+  return { mode: "new", familyPin, familyId };
 };

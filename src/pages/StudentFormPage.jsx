@@ -48,7 +48,7 @@ const navigate = useNavigate();
 
     if (res.mode === "new") {
       alert(`Registration complete!\nFamily PIN: ${res.familyPin}`);
-      navigate("/dashboard");
+      navigate("/success");
     }
 
     if (res.mode === "added") {

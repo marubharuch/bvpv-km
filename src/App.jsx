@@ -9,8 +9,9 @@ import Students from "./pages/StudentsPage";
 import Profile from "./pages/ProfilePage";
 import JoinFamilyPage from "./pages/JoinFamilyPage";
 import LoginPage from "./pages/LoginPage";
+import RegistrationSuccess from "./pages/RegistrationSuccess";
 
-<Route path="/login" element={<LoginPage />} />
+
 
 
 import PrivateRoute from "./components/PrivateRoute";
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/dashboard" element={
           <PrivateRoute><Dashboard /></PrivateRoute>
         } />
+        <Route path="/success" element={<RegistrationSuccess />} />
         <Route path="/join" element={<JoinFamilyPage />} />
         <Route path="/students" element={
           <PrivateRoute><Students /></PrivateRoute>
