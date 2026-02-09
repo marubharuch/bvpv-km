@@ -1,28 +1,29 @@
-import { useState,useEffect } from "react";
-import { useSearchParams,useNavigate } from "react-router-dom";
-import { getAuth } from "firebase/auth";
-import { ref, get, update } from "firebase/database";
+import { useState, useEffect, useContext } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { ref, get } from "firebase/database";
 import { db } from "../firebase";
+import { AuthContext } from "../context/AuthContext";
 
 import { AnimatePresence, motion } from "framer-motion";
 import StudentFlipPage from "../components/StudentFlipPage";
 import StudentPaperField from "../components/StudentPaperField";
 import StudentPaperPhoto from "../components/StudentPaperPhoto";
 import StudentSectionTitle from "../components/StudentSectionTitle";
-//import { saveStudentDraft } from "../utils/studentStorage";
 import StudentCityField from "../components/StudentCityField";
 import StudentEducationSection from "../components/StudentEducationSection";
 import StudentFamilySection from "../components/StudentFamilySection";
 import StudentMobileField from "../components/StudentMobileField";
+import StudentSkillsSection from "../components/StudentSkillsSection";
+import StudentFinancialSection from "../components/StudentFinancialSection";
+
 import { saveStudentDraft, loadStudentDraft } from "../utils/studentStorage";
 import { submitStudentRegistration } from "../services/studentSubmitService";
 
 export default function StudentFormPage() {
-const [searchParams] = useSearchParams();
-const editId = searchParams.get("edit");  // STU_1
-
-const navigate = useNavigate();
-
+  const { user } = useContext(AuthContext);   // ✅ global auth
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get("edit");
+  const navigate = useNavigate();
 
   const [page, setPage] = useState(0);
   const [direction, setDirection] = useState(1);
@@ -34,65 +35,52 @@ const navigate = useNavigate();
     saveStudentDraft(updated);
   };
 
-  const paginate = (newDir) => {
-    const nextPage = page + newDir;
-    if (nextPage >= 0 && nextPage < pages.length) {
-      setDirection(newDir);
-      setPage(nextPage);
+  const paginate = (dir) => {
+    const next = page + dir;
+    if (next >= 0 && next < pages.length) {
+      setDirection(dir);
+      setPage(next);
     }
   };
 
   const handleSubmit = async () => {
-  try {
-    const res = await submitStudentRegistration(student, editId);
+    try {
+      const res = await submitStudentRegistration(student, editId);
 
-    if (res.mode === "new") {
-      alert(`Registration complete!\nFamily PIN: ${res.familyPin}`);
-      navigate("/success");
-    }
-
-    if (res.mode === "added") {
-      alert("Student added successfully");
-      navigate("/students");
-    }
-
-    if (res.mode === "updated") {
-      alert("Student updated successfully");
-      navigate("/students");
-    }
-
-  } catch (err) {
-    alert(err.message);
-  }
-};
-
-
-
-useEffect(() => {
-  const loadData = async () => {
-    const user = getAuth().currentUser;
-
-    if (editId && user) {
-      const snap = await get(ref(db, "families"));
-
-      snap.forEach(f => {
-        if (f.child("members").hasChild(user.uid)) {
-          const stu = f.val().students?.[editId];
-          if (stu) setStudent(stu);
-        }
-      });
-
-    } else {
-      const draft = await loadStudentDraft();
-      setStudent(draft);
+      if (res.mode === "new") {
+        alert(`Registration complete!\nFamily PIN: ${res.familyPin}`);
+        navigate("/success");
+      }
+      if (res.mode === "added") {
+        alert("Student added successfully");
+        navigate("/students");
+      }
+      if (res.mode === "updated") {
+        alert("Student updated successfully");
+        navigate("/students");
+      }
+    } catch (err) {
+      alert(err.message);
     }
   };
 
-  loadData();
-}, [editId]);
-
-
-
+  useEffect(() => {
+    const loadData = async () => {
+      if (editId && user) {
+        const snap = await get(ref(db, "families"));
+        snap.forEach(f => {
+          if (f.child("members").hasChild(user.uid)) {
+            const stu = f.val().students?.[editId];
+            if (stu) setStudent(stu);
+          }
+        });
+      } else {
+        const draft = await loadStudentDraft();
+        setStudent(draft || {});
+      }
+    };
+    loadData();
+  }, [editId, user]);
 
   const pages = [
     // PAGE 1 — BASIC
@@ -101,21 +89,11 @@ useEffect(() => {
 
       <div className="flex gap-3">
         <StudentPaperPhoto photo={student.photo} onChange={(v)=>update("photo", v)} />
-
         <div>
-          <StudentPaperField
-            label="Full Name:"
-            value={student.name}
-            onSave={(v)=>update("name", v)}
-          />
-
+          <StudentPaperField label="Full Name:" value={student.name} onSave={(v)=>update("name", v)} />
           <div className="flex items-center gap-2 mb-2">
             <span>Gender:</span>
-            <select
-              value={student.gender || ""}
-              onChange={(e)=>update("gender", e.target.value)}
-              className="border-b border-black bg-transparent"
-            >
+            <select value={student.gender || ""} onChange={(e)=>update("gender", e.target.value)} className="border-b border-black bg-transparent">
               <option value="">Select</option>
               <option>Male</option>
               <option>Female</option>
@@ -126,20 +104,10 @@ useEffect(() => {
 
       <div className="flex items-center gap-2 mb-2">
         <span>Birth Date:</span>
-        <input
-          type="date"
-          value={student.dob || ""}
-          onChange={(e)=>update("dob", e.target.value)}
-          className="border-b border-black bg-transparent"
-        />
+        <input type="date" value={student.dob || ""} onChange={(e)=>update("dob", e.target.value)} className="border-b border-black bg-transparent" />
       </div>
 
-      {/* ✅ Clean mobile component */}
-      <StudentMobileField
-        value={student.mobile}
-        onSave={(v)=>update("mobile", v)}
-      />
-
+      <StudentMobileField value={student.mobile} onSave={(v)=>update("mobile", v)} />
       <StudentEducationSection student={student} update={update} />
     </StudentFlipPage>,
 
@@ -147,46 +115,34 @@ useEffect(() => {
     <StudentFlipPage key="p2" direction={direction}>
       <StudentSectionTitle title="Family & Location" />
       <StudentFamilySection student={student} update={update} />
-     <div className="flex items-center gap-2 mb-2">
-  <span>Email:</span>
-  <input
-    type="email"
-    value={student.email || ""}
-    onChange={(e)=>update("email", e.target.value)}
-    className="border-b border-black bg-transparent"
-    placeholder="Enter email"
-  />
-</div>
-
-<p className="text-xs text-gray-500 mb-2">
-  If using Gmail, no password needed. Other emails require password.
-</p>
-
-     
+      <div className="flex items-center gap-2 mb-2">
+        <span>Email:</span>
+        <input type="email" value={student.email || ""} onChange={(e)=>update("email", e.target.value)} className="border-b border-black bg-transparent" />
+      </div>
       <StudentCityField label="City:" value={student.city} onSave={(v)=>update("city", v)} />
     </StudentFlipPage>,
 
-    // PAGE 3 — ACADEMIC
+    // PAGE 3 — SUPPORT & TALENTS
     <StudentFlipPage key="p3" direction={direction}>
+      <StudentSectionTitle title="Support & Talents" />
+      <StudentFinancialSection student={student} update={update} />
+      <StudentSkillsSection student={student} update={update} />
+    </StudentFlipPage>,
+
+    // PAGE 4 — ACADEMIC
+    <StudentFlipPage key="p4" direction={direction}>
       <StudentSectionTitle title="Academic Details" />
       <StudentEducationSection student={student} update={update} />
-      <button
-  onClick={handleSubmit}
-  className="w-full bg-green-600 text-white p-3 mt-4 rounded"
->
-  {editId ? "Update Student" : "Submit Registration"}
-</button>
-
-
+      <button onClick={handleSubmit} className="w-full bg-green-600 text-white p-3 mt-4 rounded">
+        {editId ? "Update Student" : "Submit Registration"}
+      </button>
     </StudentFlipPage>
   ];
 
   return (
     <div className="max-w-md mx-auto p-4 bg-[#ece9e1] min-h-screen">
       <AnimatePresence mode="wait">
-        <motion.div key={page}>
-          {pages[page]}
-        </motion.div>
+        <motion.div key={page}>{pages[page]}</motion.div>
       </AnimatePresence>
 
       <div className="flex items-center justify-center gap-6 mt-4">

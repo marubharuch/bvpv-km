@@ -1,7 +1,13 @@
 import { Navigate } from "react-router-dom";
-import { getAuth } from "firebase/auth";
+import { useContext } from "react";
+import { AuthContext } from "../context/AuthContext";
 
 export default function PrivateRoute({ children }) {
-  const user = getAuth().currentUser;
-  return user ? children : <Navigate to="/registration" />;
+  const { user } = useContext(AuthContext);
+
+  if (user === undefined) {
+    return <div className="p-4 text-center">Checking login...</div>;
+  }
+
+  return user ? children : <Navigate to="/registration" replace />;
 }

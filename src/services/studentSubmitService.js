@@ -81,6 +81,11 @@ export const submitStudentRegistration = async (student, editId = null) => {
     },
     students: { STU_1: student }
   });
+  await set(ref(db, `users/${user.uid}`), {
+  familyId: familyRef.key,
+  role: "owner"
+});
+
 
   await clearStudentDraft();
 

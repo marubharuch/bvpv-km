@@ -1,17 +1,17 @@
-import { useState } from "react";
+import { useState, useContext } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { getAuth } from "firebase/auth";
-import { ref, get, update } from "firebase/database";
+import { ref, get, update, set } from "firebase/database";
 import { db } from "../firebase";
+import { AuthContext } from "../context/AuthContext";
 
 export default function JoinFamilyPage() {
+  const { user } = useContext(AuthContext);   // ✅ global auth
   const [searchParams] = useSearchParams();
   const familyId = searchParams.get("familyId");
   const [pin, setPin] = useState("");
   const navigate = useNavigate();
 
   const handleJoin = async () => {
-    const user = getAuth().currentUser;
     if (!user) {
       alert("Please login first");
       return;
@@ -35,10 +35,17 @@ export default function JoinFamilyPage() {
       return;
     }
 
+    // Add user to family members
     await update(ref(db, `families/${familyId}/members/${user.uid}`), {
       role: "member",
       email: user.email,
       joinedAt: Date.now()
+    });
+
+    // 🔥 Create users/{uid} mapping (important)
+    await set(ref(db, `users/${user.uid}`), {
+      familyId: familyId,
+      role: "member"
     });
 
     alert("Joined family successfully!");
