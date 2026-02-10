@@ -47,13 +47,19 @@ export default function LoginPage() {
   };
 
   const loginWithEmail = async () => {
-    try {
-      const res = await signInWithEmailAndPassword(getAuth(), email, password);
-      await redirectUser(res.user);
-    } catch {
-      alert("Invalid credentials");
-    }
-  };
+  if (email.toLowerCase().endsWith("@gmail.com")) {
+    alert("Gmail users must use 'Continue with Google' button.");
+    return;
+  }
+
+  try {
+    const res = await signInWithEmailAndPassword(getAuth(), email, password);
+    await redirectUser(res.user);
+  } catch {
+    alert("Invalid email or password");
+  }
+};
+
 
   return (
     <div className="max-w-md mx-auto p-4 space-y-4">
@@ -83,6 +89,13 @@ export default function LoginPage() {
         onChange={(e)=>setPassword(e.target.value)}
         className="border w-full p-2 rounded"
       />
+      <p
+  onClick={() => navigate("/forgot-password")}
+  className="text-sm text-blue-600 text-center cursor-pointer"
+>
+  Forgot Password?
+</p>
+
 
       <button
         onClick={loginWithEmail}

@@ -10,6 +10,7 @@ import Profile from "./pages/ProfilePage";
 import JoinFamilyPage from "./pages/JoinFamilyPage";
 import LoginPage from "./pages/LoginPage";
 import RegistrationSuccess from "./pages/RegistrationSuccess";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 
 
 
@@ -27,6 +28,8 @@ export default function App() {
         <Route path="/contact" element={<Contact />} />
         <Route path="/registration" element={<Registration />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+
         {/* Private */}
         <Route path="/dashboard" element={
           <PrivateRoute><Dashboard /></PrivateRoute>
