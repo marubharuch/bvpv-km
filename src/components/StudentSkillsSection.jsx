@@ -1,104 +1,133 @@
 import { useState } from "react";
 
-const skillOptions = {
-  indoorSports: ["Chess", "Carrom", "TT"],
-  outdoorSports: ["Cricket", "Badminton"],
-  talents: ["Singing", "Dancing", "Anchoring", "Acting"],
-  creative: ["Reel Making", "Content Writing"],
-  hobbies: ["Tracking"],
-  funActivities: ["Antakshari", "Quiz", "One Minute"]
-};
+const steps = [
+  { key: "indoorSports", title: "Indoor Sports", options: ["Chess", "Carrom", "TT"] },
+  { key: "outdoorSports", title: "Outdoor Sports", options: ["Cricket", "Badminton"] },
+  { key: "talents", title: "Talents", options: ["Singing", "Dancing", "Anchoring", "Acting"] },
+  { key: "creative", title: "Creative Skills", options: ["Reel Making", "Content Writing"] },
+  { key: "hobbies", title: "Hobbies", options: ["Tracking"] },
+  { key: "funActivities", title: "Fun Activities", options: ["Antakshari", "Quiz", "One Minute"] },
+  { key: "about", title: "Achievements & About", options: [] }
+];
 
-export default function StudentSkillsSection({ student, update }) {
+export default function StudentSkillsSection({
+  student,
+  update,
+  cardIndex,
+  setCardIndex,
+  exitSkillsMode
+}) {
+  const step = steps[cardIndex];
+  const [customInput, setCustomInput] = useState("");
 
-  const [customInput, setCustomInput] = useState({});
+  const selected = student.skills?.[step.key] || [];
 
-  const toggleSkill = (category, skill) => {
+  const toggleSkill = (skill) => {
     const current = student.skills || {};
-    const list = current[category] || [];
+    const list = current[step.key] || [];
 
-    const updatedList = list.includes(skill)
+    const updated = list.includes(skill)
       ? list.filter(s => s !== skill)
       : [...list, skill];
 
-    update("skills", { ...current, [category]: updatedList });
+    update("skills", { ...current, [step.key]: updated });
   };
 
-  const addCustomSkill = (category) => {
-    const value = customInput[category]?.trim();
-    if (!value) return;
-
-    const current = student.skills || {};
-    const list = current[category] || [];
-
-    if (!list.includes(value)) {
-      update("skills", { ...current, [category]: [...list, value] });
-    }
-
-    setCustomInput({ ...customInput, [category]: "" });
+  const addCustom = () => {
+    if (!customInput.trim()) return;
+    toggleSkill(customInput.trim());
+    setCustomInput("");
   };
 
-  const removeSkill = (category, skill) => {
-    const current = student.skills || {};
-    const list = (current[category] || []).filter(s => s !== skill);
-    update("skills", { ...current, [category]: list });
+  const nextCard = () => {
+    if (cardIndex < steps.length - 1) setCardIndex(cardIndex + 1);
   };
 
-  const renderCategory = (title, key) => {
-    const selected = student.skills?.[key] || [];
-
-    return (
-      <div className="mb-5 border-b pb-3">
-        <h4 className="font-semibold mb-2">{title}</h4>
-
-        {/* Default Options */}
-        <div className="grid grid-cols-2 gap-2 text-sm mb-2">
-          {skillOptions[key].map(skill => (
-            <label key={skill} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={selected.includes(skill)}
-                onChange={() => toggleSkill(key, skill)}
-              />
-              {skill}
-            </label>
-          ))}
-        </div>
-
-        {/* Custom Add */}
-        <div className="flex gap-2 mb-2">
-          <input
-            value={customInput[key] || ""}
-            onChange={(e)=>setCustomInput({...customInput, [key]: e.target.value})}
-            placeholder="Add other..."
-            className="border-b border-black bg-transparent flex-1 text-sm"
-          />
-          <button onClick={()=>addCustomSkill(key)} className="bg-blue-600 text-white px-2 rounded text-sm">Add</button>
-        </div>
-
-        {/* Selected Skills Display */}
-        <div className="flex flex-wrap gap-2">
-          {selected.map(skill => (
-            <span key={skill} className="bg-yellow-200 px-2 py-1 rounded text-xs flex items-center gap-1">
-              {skill}
-              <button onClick={()=>removeSkill(key, skill)} className="text-red-600">✕</button>
-            </span>
-          ))}
-        </div>
-      </div>
-    );
+  const prevCard = () => {
+    if (cardIndex > 0) setCardIndex(cardIndex - 1);
   };
 
   return (
-    <div className="mt-4">
-      <h3 className="font-bold text-lg mb-3">Skills, Talents & Activities</h3>
+    <div className="fixed inset-0 bg-[#ece9e1] flex items-center justify-center z-40 p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-5 transition-all duration-300">
 
-      {renderCategory("Indoor Sports", "indoorSports")}
-      {renderCategory("Outdoor Sports", "outdoorSports")}
-      {renderCategory("Talents", "talents")}
-      {renderCategory("Creative Skills", "creative")}
-      {renderCategory("Hobbies", "hobbies")}
-      {renderCategory("Fun Event Activities", "funActivities")}
+        {/* Header */}
+        <div className="flex items-center justify-between mb-2">
+          <button onClick={prevCard} disabled={cardIndex===0} className="text-blue-600 text-xl">⬅</button>
+          <div className="text-center">
+            <h3 className="font-bold text-green-700">{step.title}</h3>
+            <p className="text-xs text-gray-500">{cardIndex+1} / {steps.length}</p>
+          </div>
+          <button onClick={nextCard} disabled={cardIndex===steps.length-1} className="text-blue-600 text-xl">➡</button>
+        </div>
+
+        <div className="h-1 bg-gray-200 rounded mb-4">
+          <div
+            className="h-1 bg-green-500 rounded"
+            style={{ width: `${((cardIndex+1)/steps.length)*100}%` }}
+          />
+        </div>
+
+        {/* Normal skill cards */}
+        {step.key !== "about" && (
+          <>
+            <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+              {step.options.map(skill => (
+                <label key={skill} className="flex items-center gap-2 bg-gray-50 p-2 rounded">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(skill)}
+                    onChange={() => toggleSkill(skill)}
+                  />
+                  {skill}
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-2 mb-3">
+              <input
+                value={customInput}
+                onChange={(e)=>setCustomInput(e.target.value)}
+                placeholder="Add other..."
+                className="border-b border-black bg-transparent flex-1"
+              />
+              <button onClick={addCustom} className="bg-blue-600 text-white px-3 rounded">Add</button>
+            </div>
+          </>
+        )}
+
+        {/* Achievements card */}
+        {step.key === "about" && (
+          <>
+            <h4 className="font-semibold mb-2">Achievements</h4>
+            <textarea
+              placeholder="Competitions, awards..."
+              value={student.achievements || ""}
+              onChange={(e)=>update("achievements", e.target.value)}
+              className="border w-full p-2 rounded text-sm mb-3"
+            />
+
+            <h4 className="font-semibold mb-2">About Student</h4>
+            <textarea
+              placeholder="Write something..."
+              value={student.aboutMe || ""}
+              onChange={(e)=>update("aboutMe", e.target.value)}
+              className="border w-full p-2 rounded text-sm"
+            />
+          </>
+        )}
+
+        {/* Finish Button */}
+        {cardIndex === steps.length - 1 && (
+          <button
+            onClick={exitSkillsMode}
+            className="w-full bg-green-600 text-white p-2 rounded mt-4"
+          >
+            Finish Skills Section
+          </button>
+        )}
+
+      </div>
     </div>
   );
 }
