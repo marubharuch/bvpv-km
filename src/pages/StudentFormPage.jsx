@@ -19,7 +19,7 @@ import StudentMobileField from "../components/StudentMobileField";
 import StudentSkillsSection from "../components/StudentSkillsSection";
 import StudentFinancialSection from "../components/StudentFinancialSection";
 import FormStepFooter from "../components/FormStepFooter";
-import LoadingScreen from "../components/LoadingScreen"; // 👈 Import loading screen
+import LoadingScreen from "../components/LoadingScreen";
 
 import { saveStudentDraft, loadStudentDraft } from "../utils/studentStorage";
 import { submitStudentRegistration } from "../services/studentSubmitService";
@@ -44,7 +44,7 @@ export default function StudentFormPage() {
   const [regEmail, setRegEmail] = useState("");
   const [regPass, setRegPass] = useState("");
 
-  // 🟢 NEW: Loading states for submission
+  // Loading states for submission
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionProgress, setSubmissionProgress] = useState({
     message: "Preparing your submission...",
@@ -90,7 +90,14 @@ export default function StudentFormPage() {
       });
       
       setSectionError(!valid);
-      if (valid && sectionIndex < 4) setSectionIndex(sectionIndex + 1);
+      if (valid) {
+        // 🟢 Skip family section if user already has family
+        if (sectionIndex === 0 && user?.familyId) {
+          setSectionIndex(2); // Skip to Sports & Talents
+        } else if (sectionIndex < 4) {
+          setSectionIndex(sectionIndex + 1);
+        }
+      }
     }
   };
 
@@ -108,145 +115,168 @@ export default function StudentFormPage() {
     saveStudentDraft(updated);
   };
 
-  // 🟢 NEW: Enhanced submission with progress tracking
-  // 🟢 FIXED: Remove uid parameter completely
-const handleFinalSave = async () => {  // 👈 No uid parameter
-  setIsSubmitting(true);
-  setSubmissionProgress({
-    message: "Starting submission...",
-    progress: 5,
-    stage: "init"
-  });
-  
-  try {
-    // ✅ CORRECT: Only 3 parameters - student, editId, onProgress
-    const result = await submitStudentRegistration(
-      student, 
-      editId, 
-      (progress) => setSubmissionProgress(progress)  // 👈 This is the 3rd parameter
-    );
-    
+  // ---------- SUBMISSION HANDLERS ----------
+  const handleFinalSave = async () => {
+    setIsSubmitting(true);
     setSubmissionProgress({
-      message: "Success! Redirecting...",
-      progress: 100,
-      stage: "complete"
+      message: "Starting submission...",
+      progress: 5,
+      stage: "init"
     });
     
-    setTimeout(() => {
-      navigate("/dashboard");
-    }, 1000);
-    
-  } catch (error) {
-    console.error("Submission failed:", error);
-    alert(error.message || "Failed to submit. Please try again.");
-    setIsSubmitting(false);
-  }
-};
+    try {
+      const result = await submitStudentRegistration(
+        student, 
+        editId, 
+        (progress) => setSubmissionProgress(progress)
+      );
+      
+      setSubmissionProgress({
+        message: "Success! Redirecting...",
+        progress: 100,
+        stage: "complete"
+      });
+      
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 1000);
+      
+    } catch (error) {
+      console.error("Submission failed:", error);
+      alert(error.message || "Failed to submit. Please try again.");
+      setIsSubmitting(false);
+    }
+  };
 
-// 🟢 FIXED: Google registration
-const handleGoogleRegister = async () => {
-  setIsSubmitting(true);
-  setSubmissionProgress({
-    message: "Connecting to Google...",
-    progress: 10,
-    stage: "auth"
-  });
-  
-  try {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);  // 👈 Don't need to capture res
-    
+  const handleGoogleRegister = async () => {
+    setIsSubmitting(true);
     setSubmissionProgress({
-      message: "Google authentication successful! Saving your data...",
-      progress: 30,
-      stage: "auth_complete"
+      message: "Connecting to Google...",
+      progress: 10,
+      stage: "auth"
     });
     
-    await handleFinalSave();  // 👈 No uid parameter
-  } catch (error) {
-    console.error("Google sign-in failed:", error);
-    alert("Google sign-in failed. Please try again.");
-    setIsSubmitting(false);
-  }
-};
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      
+      setSubmissionProgress({
+        message: "Google authentication successful! Saving your data...",
+        progress: 30,
+        stage: "auth_complete"
+      });
+      
+      await handleFinalSave();
+    } catch (error) {
+      console.error("Google sign-in failed:", error);
+      alert("Google sign-in failed. Please try again.");
+      setIsSubmitting(false);
+    }
+  };
 
-// 🟢 FIXED: Email registration
-const handleEmailRegister = async () => {
-  if (!regEmail || regPass.length < 6) {
-    alert("Enter valid email and password (min 6 chars)");
-    return;
-  }
-  
-  setIsSubmitting(true);
-  setSubmissionProgress({
-    message: "Creating your account...",
-    progress: 10,
-    stage: "auth"
-  });
-  
-  try {
-    await createUserWithEmailAndPassword(auth, regEmail, regPass);  // 👈 Don't need to capture res
-    
-    setSubmissionProgress({
-      message: "Account created! Saving your registration...",
-      progress: 30,
-      stage: "auth_complete"
-    });
-    
-    await handleFinalSave();  // 👈 No uid parameter
-  } catch (error) {
-    console.error("Email registration failed:", error);
-    
-    if (error.code === 'auth/email-already-in-use') {
-      alert('This email is already registered. Please try logging in instead.');
-    } else if (error.code === 'auth/weak-password') {
-      alert('Password is too weak. Please use at least 6 characters.');
-    } else {
-      alert('Registration failed: ' + error.message);
+  const handleEmailRegister = async () => {
+    if (!regEmail || regPass.length < 6) {
+      alert("Enter valid email and password (min 6 chars)");
+      return;
     }
     
-    setIsSubmitting(false);
-  }
-};
+    setIsSubmitting(true);
+    setSubmissionProgress({
+      message: "Creating your account...",
+      progress: 10,
+      stage: "auth"
+    });
+    
+    try {
+      await createUserWithEmailAndPassword(auth, regEmail, regPass);
+      
+      setSubmissionProgress({
+        message: "Account created! Saving your registration...",
+        progress: 30,
+        stage: "auth_complete"
+      });
+      
+      await handleFinalSave();
+    } catch (error) {
+      console.error("Email registration failed:", error);
+      
+      if (error.code === 'auth/email-already-in-use') {
+        alert('This email is already registered. Please try logging in instead.');
+      } else if (error.code === 'auth/weak-password') {
+        alert('Password is too weak. Please use at least 6 characters.');
+      } else {
+        alert('Registration failed: ' + error.message);
+      }
+      
+      setIsSubmitting(false);
+    }
+  };
 
-// 🟢 FIXED: Handle direct submission
-const handleSubmit = async () => {
-  if (!student.photo) {
-    alert("Please upload a student photo before submitting.");
-    setSectionIndex(3);
-    return;
-  }
-  
-  if (!user) {
-    setShowRegisterChoice(true);
-  } else {
-    await handleFinalSave();  // 👈 No uid parameter
-  }
-};
+  const handleSubmit = async () => {
+    // Validate photo before submission
+    if (!student.photo) {
+      alert("Please upload a student photo before submitting.");
+      setSectionIndex(3);
+      return;
+    }
+    
+    // 🟢 Skip family validation for edit mode
+    if (editId) {
+      await handleFinalSave();
+      return;
+    }
+    
+    if (!user) {
+      setShowRegisterChoice(true);
+    } else if (!user.familyId && !student.familyContacts?.length) {
+      // Only require family contacts for new family registration
+      alert("Please add at least one family contact for new family registration.");
+      setSectionIndex(1);
+    } else {
+      await handleFinalSave();
+    }
+  };
 
   // ---------- LOAD DATA ----------
   useEffect(() => {
     const loadData = async () => {
-      if (editId && user) {
-        const snap = await get(ref(db, "families"));
-        snap.forEach(f => {
-          if (f.child("members").hasChild(user.uid)) {
-            const stu = f.val().students?.[editId];
-            if (stu) setStudent(stu);
+      try {
+        if (editId && user?.uid) {
+          const snap = await get(ref(db, "families"));
+          let foundStudent = null;
+          
+          snap.forEach(f => {
+            if (f.child("members").hasChild(user.uid)) {
+              const stu = f.val().students?.[editId];
+              if (stu) foundStudent = stu;
+            }
+          });
+          
+          if (foundStudent) {
+            setStudent(foundStudent);
+          } else {
+            console.warn("Student not found, loading draft");
+            const draft = await loadStudentDraft();
+            setStudent(draft || {});
           }
-        });
-      } else {
+        } else {
+          const draft = await loadStudentDraft();
+          setStudent(draft || {});
+        }
+      } catch (error) {
+        console.error("Error loading data:", error);
         const draft = await loadStudentDraft();
         setStudent(draft || {});
       }
     };
+    
     loadData();
-  }, [editId, user]);
+  }, [editId, user?.uid]);
 
   return (
     <div className="max-w-md mx-auto p-4 bg-[#ece9e1] min-h-screen">
       
-      {/* 🟢 NEW: Loading Screen Overlay */}
+      {/* Loading Screen Overlay */}
       {isSubmitting && (
         <LoadingScreen 
           message={submissionProgress.message}
@@ -256,16 +286,28 @@ const handleSubmit = async () => {
         />
       )}
 
-      {/* Progress Dots - Disabled during submission */}
+      {/* Progress Dots - Dynamic based on family status */}
       <div className="flex justify-center gap-2 mb-4">
-        {[0, 1, 2, 3].map(i => (
-          <div
-            key={i}
-            className={`w-3 h-3 rounded-full ${
-              i === sectionIndex ? "bg-green-600" : "bg-gray-300"
-            } ${isSubmitting ? "opacity-50" : ""}`}
-          />
-        ))}
+        {[0, 1, 2, 3].map(i => {
+          // Hide family dot for existing family users
+          if (i === 1 && user?.familyId) return null;
+          
+          // Adjust displayed index
+          let displayIndex = i;
+          if (user?.familyId) {
+            if (i === 2) displayIndex = 1;
+            if (i === 3) displayIndex = 2;
+          }
+          
+          return (
+            <div
+              key={i}
+              className={`w-3 h-3 rounded-full ${
+                displayIndex === sectionIndex ? "bg-green-600" : "bg-gray-300"
+              } ${isSubmitting ? "opacity-50" : ""}`}
+            />
+          );
+        })}
       </div>
 
       {/* SECTION 1 - Basic Info */}
@@ -350,7 +392,29 @@ const handleSubmit = async () => {
       {sectionIndex === 1 && !skillsMode && !isSubmitting && (
         <div className={`bg-white p-4 rounded shadow ${sectionError ? "border border-red-500" : ""}`}>
           <StudentSectionTitle title="Family & Location" />
-          <StudentFamilySection student={student} update={update} />
+          
+          {/* Only show family contacts for NEW FAMILY registration */}
+          {!user?.familyId && !editId && (
+            <>
+              <StudentFamilySection student={student} update={update} />
+              <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded mt-2 mb-3">
+                ⓘ Family details required for first-time registration
+              </div>
+            </>
+          )}
+          
+          {/* Show message for existing family */}
+          {user?.familyId && (
+            <div className="bg-green-50 p-3 rounded mb-3">
+              <p className="text-sm text-green-700">
+                ✓ You are already registered with a family. Adding student to existing family.
+              </p>
+              <p className="text-xs text-green-600 mt-1">
+                Family ID: {user.familyId}
+              </p>
+            </div>
+          )}
+          
           <StudentCityField
             label="City:"
             value={student.city}
@@ -358,6 +422,7 @@ const handleSubmit = async () => {
             onBlur={() => handleBlur("city")}
           />
           {touched.city && errors.city && <p className="text-red-500 text-xs">{errors.city}</p>}
+          
           <FormStepFooter onBack={prevSection} onNext={nextSection} />
         </div>
       )}

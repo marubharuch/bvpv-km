@@ -7,20 +7,18 @@ import { saveCache, loadCache } from "../utils/cache";
 export const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // Start with null, not empty object
+  const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [isLoading, setIsLoading] = useState(true); // Add loading state
+  const [isLoading, setIsLoading] = useState(true);
 
   // ✅ LOAD CACHED USER ON INITIAL MOUNT
   useEffect(() => {
     const loadStoredUser = async () => {
       try {
-        // Check localForage first (where actual user data should be)
         const cachedUser = await loadCache('currentUser');
         
         if (cachedUser) {
           setUser(cachedUser);
-          // Also load cached profile if exists
           const cachedProfile = await loadCache(`profile_${cachedUser.uid}`);
           if (cachedProfile) setProfile(cachedProfile);
         }
@@ -38,43 +36,50 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(getAuth(), async (u) => {
       if (!u) {
-        // Clear everything on logout
         setUser(null);
         setProfile(null);
         localStorage.removeItem("lastUser");
-        await saveCache('currentUser', null); // Clear from localForage too
+        await saveCache('currentUser', null);
         setIsLoading(false);
         return;
       }
 
-      // Convert Firebase user to serializable object
-      const serializableUser = {
-        uid: u.uid,
-        email: u.email,
-        displayName: u.displayName,
-        photoURL: u.photoURL,
-        emailVerified: u.emailVerified,
-        // Add only what you need, avoid circular references
-      };
+      try {
+        // 🔴 IMPORTANT: Get user data from Realtime Database
+        const userRef = ref(db, `users/${u.uid}`);
+        const userSnap = await get(userRef);
+        const userData = userSnap.val() || {};
 
-      // Save to both storages
-      setUser(serializableUser);
-      localStorage.setItem("lastUser", "true");
-      await saveCache('currentUser', serializableUser); // ✅ Save to localForage
+        // ✅ Create serializable user object WITH familyId
+        const serializableUser = {
+          uid: u.uid,
+          email: u.email,
+          displayName: u.displayName,
+          photoURL: u.photoURL,
+          emailVerified: u.emailVerified,
+          familyId: userData.familyId || null, // 👈 CRITICAL: Add familyId
+          role: userData.role || null,          // 👈 Add role if needed
+          familyPin: userData.familyPin || null // 👈 Optional: store familyPin
+        };
 
-      // Handle profile
-      const cachedProfile = await loadCache(`profile_${u.uid}`);
-      if (cachedProfile) setProfile(cachedProfile);
+        setUser(serializableUser);
+        localStorage.setItem("lastUser", "true");
+        await saveCache('currentUser', serializableUser);
 
-      const snap = await get(ref(db, `users/${u.uid}`));
-      const freshProfile = snap.val();
+        // Handle profile
+        const cachedProfile = await loadCache(`profile_${u.uid}`);
+        if (cachedProfile) setProfile(cachedProfile);
 
-      if (freshProfile) {
-        setProfile(freshProfile);
-        await saveCache(`profile_${u.uid}`, freshProfile);
+        if (userData) {
+          setProfile(userData);
+          await saveCache(`profile_${u.uid}`, userData);
+        }
+        
+      } catch (error) {
+        console.error("Error loading user data:", error);
+      } finally {
+        setIsLoading(false);
       }
-      
-      setIsLoading(false);
     });
 
     return () => unsub();
@@ -82,7 +87,12 @@ export function AuthProvider({ children }) {
 
   // Don't render children until we know auth state
   if (isLoading) {
-    return <div>Loading...</div>; // Or your loading component
+    return <div className="flex items-center justify-center min-h-screen">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <p className="mt-4 text-gray-600">Loading...</p>
+      </div>
+    </div>;
   }
 
   return (
