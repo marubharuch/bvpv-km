@@ -53,14 +53,7 @@ export default function Home() {
             {t.button}
           </button>
         </div>
-        <div className="text-center space-y-1">
-  <h1 className="text-lg font-bold text-blue-900">
-    શ્રી વિશા ઓશવાળ જૈન કેળવણી મંડળ
-  </h1>
-  <p className="text-sm font-medium text-gray-700">
-    બોરસદ – વાલવોડ – પાદરા – વટાદરા
-  </p>
-</div>
+  
 
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-lg p-5 space-y-4 border border-amber-100">

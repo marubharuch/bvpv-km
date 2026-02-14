@@ -1,5 +1,7 @@
 import { Routes, Route } from "react-router-dom";
-import Navbar from "./components/Navbar";
+import AppLayout from "./layouts/AppLayout";
+import PrivateRoute from "./components/PrivateRoute";
+
 import Home from "./pages/Home";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
@@ -11,17 +13,14 @@ import JoinFamilyPage from "./pages/JoinFamilyPage";
 import LoginPage from "./pages/LoginPage";
 import RegistrationSuccess from "./pages/RegistrationSuccess";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import BottomNavbar from "./components/BottomNavbar";
-
-
-
-import PrivateRoute from "./components/PrivateRoute";
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-gray-100">
-    
-      <Routes>
+    <Routes>
+
+      {/* ⭐ Layout Route */}
+      <Route element={<AppLayout />}>
+
         {/* Public */}
         <Route path="/" element={<Home />} />
         <Route path="/about" element={<About />} />
@@ -31,19 +30,26 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
         {/* Private */}
-        <Route path="/dashboard" element={
-          <PrivateRoute><Dashboard /></PrivateRoute>
-        } />
+        <Route
+          path="/dashboard"
+          element={<PrivateRoute><Dashboard /></PrivateRoute>}
+        />
+
         <Route path="/success" element={<RegistrationSuccess />} />
         <Route path="/join" element={<JoinFamilyPage />} />
-        <Route path="/students" element={
-          <PrivateRoute><Students /></PrivateRoute>
-        } />
-        <Route path="/profile" element={
-          <PrivateRoute><Profile /></PrivateRoute>
-        } />
-      </Routes>
-      <BottomNavbar />  
-    </div>
+
+        <Route
+          path="/students"
+          element={<PrivateRoute><Students /></PrivateRoute>}
+        />
+
+        <Route
+          path="/profile"
+          element={<PrivateRoute><Profile /></PrivateRoute>}
+        />
+
+      </Route>
+
+    </Routes>
   );
 }

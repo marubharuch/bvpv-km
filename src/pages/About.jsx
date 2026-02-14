@@ -1,23 +1,17 @@
-export default function contact() {
- 
+export default function Contact() {
   return (
-    <div className="bg-white p-4 rounded shadow space-y-6">
+    <div className="max-w-md mx-auto p-4 space-y-6">
+
+      {/* 🏛️ HEADER */}
+     
 
       {/* 👑 Office Bearers */}
-      <div>
-              <div className="text-center space-y-1">
-  <h1 className="text-lg font-bold text-blue-900">
-    શ્રી વિશા ઓશવાળ જૈન કેળવણી મંડળ
-  </h1>
-  <p className="text-sm font-medium text-gray-700">
-    બોરસદ – વાલવોડ – પાદરા – વટાદરા
-  </p>
-</div>
-        <h2 className="text-lg font-bold mb-3">
-          મુખ્ય હોદ્દા (Office Bearers)
+      <div className="bg-white p-4 rounded-xl shadow">
+        <h2 className="text-base font-bold text-blue-900 border-b pb-2 mb-3">
+          👑 મુખ્ય હોદ્દા (Office Bearers)
         </h2>
 
-        <ul className="space-y-1 text-gray-800">
+        <ul className="space-y-2 text-gray-800">
           <li>President (પ્રેસિડેન્ટ)</li>
           <li>Vice President (વાઈસ પ્રેસિડેન્ટ)</li>
           <li>Secretary (સેક્રેટરી)</li>
@@ -28,12 +22,12 @@ export default function contact() {
       </div>
 
       {/* 👥 Executive Committee */}
-      <div>
-        <h2 className="text-lg font-bold mb-3">
-          કાર્યકારી સમિતિ (Executive)
+      <div className="bg-white p-4 rounded-xl shadow">
+        <h2 className="text-base font-bold text-blue-900 border-b pb-2 mb-3">
+          👥 કાર્યકારી સમિતિ (Executive)
         </h2>
 
-        <ul className="space-y-1 text-gray-800">
+        <ul className="space-y-2 text-gray-800">
           <li>Executive Member (કાર્યકારી સભ્ય)</li>
           <li>Invited Member (આમંત્રિત સભ્ય)</li>
           <li>Advisor (સલાહકાર)</li>
@@ -41,12 +35,12 @@ export default function contact() {
       </div>
 
       {/* ⭐ Optional Roles */}
-      <div>
-        <h2 className="text-lg font-bold mb-3">
-          વિશેષ જવાબદારીઓ (Optional Roles)
+      <div className="bg-white p-4 rounded-xl shadow">
+        <h2 className="text-base font-bold text-blue-900 border-b pb-2 mb-3">
+          ⭐ વિશેષ જવાબદારીઓ (Optional Roles)
         </h2>
 
-        <ul className="space-y-1 text-gray-800">
+        <ul className="space-y-2 text-gray-800">
           <li>Coordinator (કોઓર્ડિનેટર)</li>
           <li>Joint Coordinator (સહ કોઓર્ડિનેટર)</li>
           <li>Media Coordinator (મીડિયા કોઓર્ડિનેટર)</li>
@@ -60,5 +54,4 @@ export default function contact() {
 
     </div>
   );
-
 }
