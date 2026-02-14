@@ -1,144 +1,64 @@
-import { useState } from "react";
-
-export default function About() {
-  const [lang, setLang] = useState("guj");
-
+export default function contact() {
+ 
   return (
-    <div className="max-w-md mx-auto p-4 text-gray-800">
+    <div className="bg-white p-4 rounded shadow space-y-6">
 
-      {/* Language Switch */}
-      <div className="flex justify-end gap-2 text-xs mb-3">
-        <button
-          onClick={() => setLang("eng")}
-          className={`px-2 py-1 rounded ${lang==="eng" ? "bg-blue-600 text-white" : "bg-gray-200"}`}
-        >
-          ENG
-        </button>
-        <button
-          onClick={() => setLang("guj")}
-          className={`px-2 py-1 rounded ${lang==="guj" ? "bg-blue-600 text-white" : "bg-gray-200"}`}
-        >
-          ગુજરાતી
-        </button>
-      </div>
-
-      {/* Single Card */}
-      <div className="bg-white p-4 rounded shadow space-y-4 text-sm leading-relaxed">
-
-        {/* Title */}
-        <h2 className="text-lg font-bold text-center">
-          {lang === "eng" ? "💻 Project Information" : "💻 પ્રોજેક્ટ માહિતી"}
+      {/* 👑 Office Bearers */}
+      <div>
+              <div className="text-center space-y-1">
+  <h1 className="text-lg font-bold text-blue-900">
+    શ્રી વિશા ઓશવાળ જૈન કેળવણી મંડળ
+  </h1>
+  <p className="text-sm font-medium text-gray-700">
+    બોરસદ – વાલવોડ – પાદરા – વટાદરા
+  </p>
+</div>
+        <h2 className="text-lg font-bold mb-3">
+          મુખ્ય હોદ્દા (Office Bearers)
         </h2>
 
-        {/* Official Note */}
-        {lang === "eng" ? (
-          <>
-            <p>
-              This project has been created to effectively fulfill the objectives of the Mandal.
-              It has been developed under the guidance of 
-              <span className="font-semibold"> Shree Ashwin Shah (C.A.), Secretary</span>.
-            </p>
-
-            <p>
-              The project was initiated through the joint efforts of 
-              <span className="font-semibold"> Mr. Sanjay Shah</span>, a hobby programmer with interest in technology, 
-              and his daughter <span className="font-semibold"> Hetavi Shah</span>, who is working in the IT industry.
-            </p>
-
-            <p>
-              Through this project, IT professionals and students from our community are warmly invited to contribute technically for the benefit of society.
-            </p>
-
-            <p>Having trouble using the website? Please let us know.</p>
-          </>
-        ) : (
-          <>
-            <p>
-              મંડળના ઉદ્દેશ્યોને વધુ અસરકારક રીતે સાકાર કરવા માટે આ પ્રોજેક્ટની રચના કરવામાં આવી છે.
-              આ પ્રોજેક્ટ મંડળના સેક્રેટરી 
-              <span className="font-semibold"> શ્રી અશ્વિન શાહ (C.A.)</span> ના માર્ગદર્શન હેઠળ તૈયાર કરવામાં આવ્યો છે.
-            </p>
-
-            <p>
-              પ્રોજેક્ટની શરૂઆત <span className="font-semibold">શ્રી સંજય શાહ</span> તથા તેમની પુત્રી 
-              <span className="font-semibold"> હેતવી શાહ</span> ના સંયુક્ત પ્રયત્નોથી કરવામાં આવી છે.
-            </p>
-
-            <p>
-              આ પ્રોજેક્ટ દ્વારા આપણા સમાજના આઈ.ટી. પ્રોફેશનલ્સ અને સ્ટુડન્ટ્સને સમાજ માટે ટેક્નિકલ યોગદાન આપવા હાર્દિક આમંત્રણ આપવામાં આવે છે.
-            </p>
-
-            <p>વેબસાઇટ વાપરવામાં કોઈ મુશ્કેલી આવે તો કૃપા કરીને જાણ કરો.</p>
-          </>
-        )}
-
-        {/* Report Issue Button */}
-        <div className="text-center">
-          <a
-            href="https://wa.me/919974021397?text=BVPV%20Website%20issue"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block bg-green-500 hover:bg-green-600 text-white font-semibold px-5 py-2 rounded-lg shadow-md"
-          >
-            {lang === "eng" ? "Report an Issue" : "સમસ્યા જણાવો"}
-          </a>
-        </div>
-
-        {/* Meet the Developers (Always English) */}
-        <div className="border-t pt-4">
-          <h3 className="text-center font-bold text-base mb-3">
-            👩‍💻 Meet the Developers
-          </h3>
-
-          <div className="flex gap-3 items-center bg-gray-50 p-3 rounded mb-3">
-            <img
-              src="/hss.jpg"
-              alt="Hetavi Shah"
-              className="w-16 h-20 object-cover border shadow-sm"
-            />
-            <div>
-              <p className="font-semibold">Hetavi Shah</p>
-              <p className="text-gray-600 text-xs">
-                Working in IT industry in Business Analytics & Business Intelligence domain.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex gap-3 items-center bg-gray-50 p-3 rounded">
-            <img
-              src="/hss2.jpg"
-              alt="Sanjay Shah"
-              className="w-16 h-20 object-cover border shadow-sm"
-            />
-            <div>
-              <p className="font-semibold">Sanjay Shah</p>
-              <p className="text-gray-600 text-xs">
-                Technology enthusiast and hobby programmer contributing to planning and development.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* GitHub */}
-        <div className="border-t pt-3">
-          <p className="font-semibold">🔗 GitHub</p>
-          <a
-            href="https://github.com/marubharuch/bvpv-km"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-700 underline break-all"
-          >
-            https://github.com/marubharuch/bvpv-km
-          </a>
-        </div>
-
-        {/* Firebase */}
-        <div className="border-t pt-3">
-          <p className="font-semibold">☁ Firebase Account</p>
-          <p className="font-semibold break-all">oswalbvpv@gmail.com</p>
-        </div>
-
+        <ul className="space-y-1 text-gray-800">
+          <li>President (પ્રેસિડેન્ટ)</li>
+          <li>Vice President (વાઈસ પ્રેસિડેન્ટ)</li>
+          <li>Secretary (સેક્રેટરી)</li>
+          <li>Joint Secretary (સહ સેક્રેટરી)</li>
+          <li>Treasurer (ખજાનચી)</li>
+          <li>Joint Treasurer (સહ ખજાનચી)</li>
+        </ul>
       </div>
+
+      {/* 👥 Executive Committee */}
+      <div>
+        <h2 className="text-lg font-bold mb-3">
+          કાર્યકારી સમિતિ (Executive)
+        </h2>
+
+        <ul className="space-y-1 text-gray-800">
+          <li>Executive Member (કાર્યકારી સભ્ય)</li>
+          <li>Invited Member (આમંત્રિત સભ્ય)</li>
+          <li>Advisor (સલાહકાર)</li>
+        </ul>
+      </div>
+
+      {/* ⭐ Optional Roles */}
+      <div>
+        <h2 className="text-lg font-bold mb-3">
+          વિશેષ જવાબદારીઓ (Optional Roles)
+        </h2>
+
+        <ul className="space-y-1 text-gray-800">
+          <li>Coordinator (કોઓર્ડિનેટર)</li>
+          <li>Joint Coordinator (સહ કોઓર્ડિનેટર)</li>
+          <li>Media Coordinator (મીડિયા કોઓર્ડિનેટર)</li>
+          <li>IT Coordinator (આઈટી કોઓર્ડિનેટર)</li>
+          <li>Cultural Head (સાંસ્કૃતિક વિભાગ)</li>
+          <li>Sports Head (રમતગમત વિભાગ)</li>
+          <li>Youth Head (યુવા વિભાગ)</li>
+          <li>Women Head (મહિલા વિભાગ)</li>
+        </ul>
+      </div>
+
     </div>
   );
+
 }

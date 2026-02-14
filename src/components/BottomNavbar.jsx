@@ -5,16 +5,22 @@ import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import localforage from "localforage";
 
-import { Home, LayoutDashboard, Info, User, LogIn } from "lucide-react";
+import {
+  Home,
+  LayoutDashboard,
+  Info,
+  User,
+  LogIn
+} from "lucide-react";
 
-export default function Navbar() {
+export default function BottomNavbar() {
   const { user } = useContext(AuthContext);
 
   const [registered, setRegistered] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadCachedStatus = async () => {
+    const loadStatus = async () => {
       if (!user?.uid) {
         setRegistered(false);
         setLoading(false);
@@ -28,8 +34,8 @@ export default function Navbar() {
         setRegistered(cached);
         setLoading(false);
       } else {
-        const userSnap = await get(ref(db, `users/${user.uid}/familyId`));
-        const hasFamily = userSnap.exists();
+        const snap = await get(ref(db, `users/${user.uid}/familyId`));
+        const hasFamily = snap.exists();
 
         setRegistered(hasFamily);
         setLoading(false);
@@ -37,50 +43,47 @@ export default function Navbar() {
       }
     };
 
-    loadCachedStatus();
+    loadStatus();
   }, [user?.uid]);
 
   if (loading) return null;
 
   return (
-    <nav className="flex justify-around items-center bg-white p-3 shadow text-sm">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg flex justify-around items-center py-2 z-50">
 
       {/* 🏠 Home */}
       <Link to="/" className="flex flex-col items-center text-gray-700">
-        <Home size={20} />
-        <span>Home</span>
+        <Home size={22} />
+        <span className="text-xs">Home</span>
       </Link>
 
       {/* ℹ️ About */}
       <Link to="/about" className="flex flex-col items-center text-gray-700">
-        <Info size={20} />
-        <span>About</span>
+        <Info size={22} />
+        <span className="text-xs">About</span>
       </Link>
 
       {/* 👨‍💻 Developer */}
       <Link to="/contact" className="flex flex-col items-center text-gray-700">
-        <User size={20} />
-        <span>Developer</span>
+        <User size={22} />
+        <span className="text-xs">Developer</span>
       </Link>
 
-      {/* 🔄 Dynamic Last Button */}
+      {/* 🔄 Dynamic */}
       {!user?.uid ? (
-        // 👤 Not logged in → Login
         <Link to="/login" className="flex flex-col items-center text-gray-700">
-          <LogIn size={20} />
-          <span>Login</span>
+          <LogIn size={22} />
+          <span className="text-xs">Login</span>
         </Link>
       ) : registered ? (
-        // 📊 Logged in & registered → Dashboard
-        <Link to="/dashboard" className="flex flex-col items-center text-gray-700">
-          <LayoutDashboard size={20} />
-          <span>Dashboard</span>
+        <Link to="/dashboard" className="flex flex-col items-center text-blue-600">
+          <LayoutDashboard size={22} />
+          <span className="text-xs">Dashboard</span>
         </Link>
       ) : (
-        // ⚠️ Logged in but not registered → Registration
         <Link to="/registration" className="flex flex-col items-center text-blue-600">
-          <LayoutDashboard size={20} />
-          <span>Register</span>
+          <LayoutDashboard size={22} />
+          <span className="text-xs">Register</span>
         </Link>
       )}
 

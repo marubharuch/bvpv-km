@@ -11,7 +11,7 @@ import JoinFamilyPage from "./pages/JoinFamilyPage";
 import LoginPage from "./pages/LoginPage";
 import RegistrationSuccess from "./pages/RegistrationSuccess";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-
+import BottomNavbar from "./components/BottomNavbar";
 
 
 
@@ -20,7 +20,7 @@ import PrivateRoute from "./components/PrivateRoute";
 export default function App() {
   return (
     <div className="min-h-screen bg-gray-100">
-      <Navbar />
+    
       <Routes>
         {/* Public */}
         <Route path="/" element={<Home />} />
@@ -43,6 +43,7 @@ export default function App() {
           <PrivateRoute><Profile /></PrivateRoute>
         } />
       </Routes>
+      <BottomNavbar />  
     </div>
   );
 }
