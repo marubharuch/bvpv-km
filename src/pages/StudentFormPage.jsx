@@ -23,6 +23,8 @@ import LoadingScreen from "../components/LoadingScreen";
 
 import { saveStudentDraft, loadStudentDraft } from "../utils/studentStorage";
 import { submitStudentRegistration } from "../services/studentSubmitService";
+import localforage from "localforage";
+
 
 export default function StudentFormPage() {
   const { user } = useContext(AuthContext);
@@ -136,7 +138,8 @@ export default function StudentFormPage() {
         progress: 100,
         stage: "complete"
       });
-      
+      await localforage.removeItem("pendingFamilyContacts");
+
       setTimeout(() => {
         navigate("/dashboard");
       }, 1000);
@@ -236,6 +239,25 @@ export default function StudentFormPage() {
       await handleFinalSave();
     }
   };
+
+  // 🔹 LOAD CONTACTS FROM ONBOARDING (localforage)
+useEffect(() => {
+  const loadOnboardingContacts = async () => {
+    // Only for NEW FAMILY registration
+    if (user?.familyId) return;
+
+    const pending = await localforage.getItem("pendingFamilyContacts");
+
+    if (pending && pending.length > 0) {
+      setStudent(prev => ({
+        ...prev,
+        familyContacts: pending
+      }));
+    }
+  };
+
+  loadOnboardingContacts();
+}, [user?.familyId]);
 
   // ---------- LOAD DATA ----------
   useEffect(() => {

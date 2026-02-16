@@ -13,7 +13,8 @@ import JoinFamilyPage from "./pages/JoinFamilyPage";
 import LoginPage from "./pages/LoginPage";
 import RegistrationSuccess from "./pages/RegistrationSuccess";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-
+import ConnectorsPage from "./pages/ConnectorsPage";
+import UniversalOnboardingPage from "./pages/UniversalOnboardingPage";
 export default function App() {
   return (
     <Routes>
@@ -28,8 +29,11 @@ export default function App() {
         <Route path="/registration" element={<Registration />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/connectors" element={<ConnectorsPage />} />
+
 
         {/* Private */}
+          <Route path="/onboarding" element={<UniversalOnboardingPage />} />
         <Route
           path="/dashboard"
           element={<PrivateRoute><Dashboard /></PrivateRoute>}

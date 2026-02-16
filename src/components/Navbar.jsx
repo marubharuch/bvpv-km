@@ -4,6 +4,7 @@ import { ref, get } from "firebase/database";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import localforage from "localforage";
+import { Trophy } from "lucide-react";
 
 import {
   Home,
@@ -55,7 +56,7 @@ export default function Navbar() {
         ? "text-blue-600"
         : "text-gray-500"
     }`;
-
+console.log("Navbar render - user:", user, "registered:", registered, "location:", location.pathname);  
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-xl flex justify-around items-center py-2 rounded-t-2xl z-50">
 
@@ -76,6 +77,13 @@ export default function Navbar() {
         <User size={24} />
         <span className="text-xs">Developer</span>
       </Link>
+      
+      {/* 🏆 Competition */}
+<Link to="/connectors" className={tabClass("/connectors")}>
+  <Trophy size={24} />
+  <span className="text-xs">Competition</span>
+</Link>
+
 
       {/* 🔄 Dynamic Last Tab */}
       {!user?.uid ? (
