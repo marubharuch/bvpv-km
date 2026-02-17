@@ -717,6 +717,34 @@ export const submitStudentRegistration = async (student, editId = null, onProgre
         lastLogin: Date.now()
       }));
 
+      // ============================================
+      // 🏆 LINK TO CONNECTOR (Competition Integration)
+      // ============================================
+      // Check if this mobile number was uploaded as a connector
+      // If yes, update the connector record with joinedUserId
+      try {
+        const mobile = student.mobile.replace(/\D/g, '').slice(-10);
+        const connectorRef = ref(db, `connectors/${mobile}`);
+        const connectorSnap = await get(connectorRef);
+        
+        if (connectorSnap.exists()) {
+          console.log('✅ Found matching connector! Linking user...');
+          
+          await update(connectorRef, {
+            joinedUserId: user.uid,
+            joinedAt: Date.now(),
+            familyId: familyId
+          });
+          
+          console.log('✅ Successfully linked to connector:', connectorSnap.val().uploadedBy);
+        } else {
+          console.log('ℹ️ No matching connector found for mobile:', mobile);
+        }
+      } catch (connectorError) {
+        // Don't fail registration if connector linking fails
+        console.warn('⚠️ Connector linking failed (non-critical):', connectorError);
+      }
+      
       await clearStudentDraft();
       updateProgress("Registration complete!", 100);
 

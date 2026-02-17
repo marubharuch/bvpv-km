@@ -215,30 +215,36 @@ export default function StudentFormPage() {
     }
   };
 
-  const handleSubmit = async () => {
-    // Validate photo before submission
-    if (!student.photo) {
-      alert("Please upload a student photo before submitting.");
-      setSectionIndex(3);
-      return;
-    }
-    
-    // 🟢 Skip family validation for edit mode
-    if (editId) {
-      await handleFinalSave();
-      return;
-    }
-    
-    if (!user) {
-      setShowRegisterChoice(true);
-    } else if (!user.familyId && !student.familyContacts?.length) {
-      // Only require family contacts for new family registration
-      alert("Please add at least one family contact for new family registration.");
-      setSectionIndex(1);
-    } else {
-      await handleFinalSave();
+ const handleSubmit = async () => {
+  // Photo is OPTIONAL — no validation needed
+
+  // 🟢 Skip family validation for edit mode
+  if (editId) {
+    await handleFinalSave();
+    return;
+  }
+
+  if (!user) {
+    setShowRegisterChoice(true);
+  } else if (!user.familyId && !student.familyContacts?.length) {
+    // Only require family contacts for new family registration
+    alert("Please add at least one family contact for new family registration.");
+    setSectionIndex(1);
+  } else {
+    await handleFinalSave();
+  }
+};
+useEffect(() => {
+  const loadContacts = async () => {
+    const saved = await localforage.getItem("onboardingContacts");
+    if (saved) {
+      setContacts(saved);
     }
   };
+
+  loadContacts();
+}, []);
+
 
   // 🔹 LOAD CONTACTS FROM ONBOARDING (localforage)
 useEffect(() => {

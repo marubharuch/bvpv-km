@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { loadCache, saveCache, clearCache } from "../utils/cache";
 import { AuthContext } from "../context/AuthContext";
 import { restoreFromFirebase } from "../services/studentSubmitService";
-
+import OswalConnectorsPopup from "./ConnectorsPage";
 
 /**
  * Family Dashboard Page - Main dashboard for family management
@@ -32,7 +32,7 @@ export default function FamilyDashboardPage() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   // Popup state
-
+  const [showPopup, setShowPopup] = useState(true);
   
   // Add member form state
   const [showAddMember, setShowAddMember] = useState(false);
@@ -43,13 +43,27 @@ const [showLocationPopup, setShowLocationPopup] = useState(false);
 const [showConfirmGps, setShowConfirmGps] = useState(false);
 const [showFamilyNameEditor, setShowFamilyNameEditor] = useState(false);
 const [memberOrder, setMemberOrder] = useState([]);
-const orderedMembers = family?.memberOrder ?? [];
+const orderedMembers = family.memberOrder || [];
 
 
+const sortByOrder = (list, type) => {
+  if (!orderedMembers.length) return list;
 
+  return [...list].sort((a, b) => {
+    const aIndex = orderedMembers.findIndex(
+      m => m.name === a.name && m.type === type
+    );
 
+    const bIndex = orderedMembers.findIndex(
+      m => m.name === b.name && m.type === type
+    );
 
+    return aIndex - bIndex;
+  });
+};
 
+const sortedContacts = sortByOrder(contacts, "contact");
+const sortedStudents = sortByOrder(students, "student");
 
 
 
@@ -384,7 +398,8 @@ const saveFamilyField = async () => {
         ? `${newMember.countryCode}${cleanMobile}`
         : "";
 
-      
+      // Create new contact reference
+      const newRef = push(ref(db, `families/${familyId}/familyContacts`));
 
      // ⭐ IF EDITING EXISTING CONTACT
 if (editingContact) {
@@ -551,47 +566,6 @@ if (editingContact) {
         : Object.entries(family.students).map(([id, data]) => ({ id, ...data })))
     : [];
 
-
-  /* 🔧 FIXED ORDER PATCH START */
-
-  // SAFE — family may be null on first render
- 
-
-  const applyOrder = (list, type) => {
-    if (!orderedMembers.length) return list;
-
-    return [...list].sort((a, b) => {
-      const aIndex = orderedMembers.findIndex(
-        m => m.name === a.name && m.type === type
-      );
-
-      const bIndex = orderedMembers.findIndex(
-        m => m.name === b.name && m.type === type
-      );
-
-      if (aIndex === -1 && bIndex === -1) return 0;
-      if (aIndex === -1) return 1;
-      if (bIndex === -1) return -1;
-
-      return aIndex - bIndex;
-    });
-  };
-
-  const sortedContacts = applyOrder(contacts, "contact");
-const sortedStudents = applyOrder(students, "student");
-
-  /* 🔧 FIXED ORDER PATCH END */
-
-/* ================= DROP-IN PATCH : APPLY FAMILY ORDER ================= */
-
-
-
-
-
-
-
-/* ================= END PATCH ================= */
-
   // 🔹 Loading state
   if (!user) {
     return (
@@ -732,7 +706,7 @@ const sortedStudents = applyOrder(students, "student");
   <span className="text-gray-600">Family Name:</span>
 
   <div className="flex items-center gap-2">
-    <span className="font-medium"> {family.memberOrder?.[0]?.name}</span>
+    <span className="font-medium">{family.familyName}</span>
    <EditIconButton onClick={openFamilyNameEditor} />
 
       
@@ -760,7 +734,7 @@ const sortedStudents = applyOrder(students, "student");
 
   {family.address ? (
     <div className="flex justify-between items-start">
-  
+  <span className="text-gray-600">Address:</span>
 
   <div className="flex items-start gap-2 text-right">
     <span>{family.address || "Not set"}</span>
@@ -820,7 +794,7 @@ const sortedStudents = applyOrder(students, "student");
           <p className="text-gray-500 text-center py-4">No students added yet.</p>
         ) : (
           <div className="space-y-2">
-            {sortedStudents.map((student) => (
+            {students.map((student) => (
               <div
                 key={student.id}
                 className="flex justify-between items-center border-b border-gray-200 py-3 last:border-b-0"
@@ -886,16 +860,21 @@ const sortedStudents = applyOrder(students, "student");
           <p className="text-gray-500 text-center py-4">No contacts added yet.</p>
         ) : (
           <div className="space-y-2">
-         {sortedContacts.map((contact, index) => (
+         {contacts.map((contact, index) => (
   <div
     key={index}
-    className="flex items-center justify-between border-b border-gray-200 py-[2px] last:border-b-0"
+    className="flex items-center justify-between border-b border-gray-200 py-3 last:border-b-0"
   >
     {/* LEFT SIDE */}
     <div className="flex items-center gap-3 flex-1">
 
       {/* ⭐ CIRCLE EDIT ICON */}
-   
+       <button
+      onClick={() => editContact(index, contact)}
+      className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 shrink-0"
+    >
+      ✏️
+    </button>
 
       {/* NAME + RELATION INLINE */}
       <div>
@@ -921,7 +900,6 @@ const sortedStudents = applyOrder(students, "student");
           </p>
         )}
       </div>
-          
 
     </div>
 
@@ -944,12 +922,7 @@ const sortedStudents = applyOrder(students, "student");
       )}
 
     </div>
-<button
-      onClick={() => editContact(index, contact)}
-      className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 shrink-0"
-    >
-      ✏️
-    </button>
+
   </div>
 ))}
 
@@ -1029,15 +1002,14 @@ const sortedStudents = applyOrder(students, "student");
         />
 
         <div className="flex gap-2">
-         <button onClick={saveNewMember} disabled={savingMember}>
-  {savingMember ? "Saving..." : "Save"}
-</button>
           <button
-            onClick={() => {
-  setShowAddMember(false);
-  setEditingContact(null);
-  setNewMember({ name: "", relation: "parent", countryCode: "+91", mobile: "", email: "" });
-}}
+            onClick={saveNewMember}
+            className="flex-1 bg-green-600 text-white py-2 rounded"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => setShowAddMember(false)}
             className="flex-1 border py-2 rounded"
           >
             Cancel

@@ -31,6 +31,7 @@ export default function ContactOnboardingPage() {
       .filter(Boolean);
 
     setContacts(mobiles);
+    await localforage.setItem("onboardingContacts", mobiles);
     checkFamilies(mobiles);
   };
 

@@ -10,6 +10,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authInitialized, setAuthInitialized] = useState(false); // 👈 ADD THIS
 
   // ✅ LOAD CACHED USER ON INITIAL MOUNT
   useEffect(() => {
@@ -24,9 +25,8 @@ export function AuthProvider({ children }) {
         }
       } catch (error) {
         console.error("Error loading cached user:", error);
-      } finally {
-        setIsLoading(false);
       }
+      // Don't set loading false here anymore
     };
 
     loadStoredUser();
@@ -41,6 +41,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem("lastUser");
         await saveCache('currentUser', null);
         setIsLoading(false);
+        setAuthInitialized(true); // 👈 ADD THIS
         return;
       }
 
@@ -57,9 +58,9 @@ export function AuthProvider({ children }) {
           displayName: u.displayName,
           photoURL: u.photoURL,
           emailVerified: u.emailVerified,
-          familyId: userData.familyId || null, // 👈 CRITICAL: Add familyId
-          role: userData.role || null,          // 👈 Add role if needed
-          familyPin: userData.familyPin || null // 👈 Optional: store familyPin
+          familyId: userData.familyId || null,
+          role: userData.role || null,
+          familyPin: userData.familyPin || null
         };
 
         setUser(serializableUser);
@@ -79,14 +80,15 @@ export function AuthProvider({ children }) {
         console.error("Error loading user data:", error);
       } finally {
         setIsLoading(false);
+        setAuthInitialized(true); // 👈 ADD THIS
       }
     });
 
     return () => unsub();
   }, []);
 
-  // Don't render children until we know auth state
-  if (isLoading) {
+  // Don't render children until Firebase Auth has initialized
+  if (!authInitialized) { // 👈 CHANGE THIS LINE
     return <div className="flex items-center justify-center min-h-screen">
       <div className="text-center">
         <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>

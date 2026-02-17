@@ -15,6 +15,8 @@ import RegistrationSuccess from "./pages/RegistrationSuccess";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ConnectorsPage from "./pages/ConnectorsPage";
 import UniversalOnboardingPage from "./pages/UniversalOnboardingPage";
+import LeaderboardPage from "./pages/LeaderboardPage";
+
 export default function App() {
   return (
     <Routes>
@@ -30,6 +32,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
+        <Route path="/leaderboard" element={<LeaderboardPage />} />
 
 
         {/* Private */}

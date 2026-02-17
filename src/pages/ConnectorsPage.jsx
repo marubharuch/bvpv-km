@@ -2,9 +2,11 @@ import { useState, useEffect, useContext } from "react";
 import { ref, get, update } from "firebase/database";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 export default function ConnectorsPage() {
   const { user } = useContext(AuthContext);
+  const navigate = useNavigate();
 
   const [connectors, setConnectors] = useState([]);
   const [stats, setStats] = useState({
@@ -99,7 +101,7 @@ export default function ConnectorsPage() {
 
     return (
       !c.joinedUserId &&
-      (!c.invitedAt || now > c.invitedAt + 7 * 24 * 60 * 60 * 1000)
+      (!c.invitedAt || now > c.invitedAt + 3 * 24 * 60 * 60 * 1000)
     );
   });
 
@@ -137,6 +139,14 @@ export default function ConnectorsPage() {
             <p>Joined</p>
           </div>
         </div>
+
+        {/* View Leaderboard Button */}
+        <button
+          onClick={() => navigate('/leaderboard')}
+          className="w-full mt-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white py-2 px-4 rounded font-semibold shadow-lg hover:shadow-xl transition-all"
+        >
+          🏆 View Full Leaderboard
+        </button>
       </div>
 
       {/* 📱 UPLOAD CONTACTS */}

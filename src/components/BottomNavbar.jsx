@@ -53,7 +53,7 @@ setLoading(false);
     }, [user?.uid]);
 
     if (loading) return null;
-console.log("BottomNavbar render - user:", user.familyId, "registered:", registered);
+console.log("BottomNavbar render - user:", user?.familyId, "registered:", registered);
     return (
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg flex justify-around items-center py-2 z-50">
 
