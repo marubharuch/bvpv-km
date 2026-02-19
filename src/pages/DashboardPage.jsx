@@ -5,6 +5,7 @@ import { db, auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import EditMemberModal from "../components/modals/EditMemberModal";
+import ImageUploadBox from "../components/ImageUploadBox";
 
 export default function FamilyDashboardPage() {
   const { user } = useContext(AuthContext);
@@ -91,6 +92,12 @@ export default function FamilyDashboardPage() {
         {students.map(student => (
           <div key={student.id} className="flex justify-between border-b py-2">
             <div>
+              <ImageUploadBox
+  familyId={familyId}
+  memberId={student.id}
+  photoUrl={student.photoUrl}
+/>
+
               <p className="font-medium">{student.name}</p>
               <p className="text-sm text-gray-500">
                 {student.education || "Add Education"}
@@ -112,6 +119,12 @@ export default function FamilyDashboardPage() {
         {contacts.map(contact => (
           <div key={contact.id} className="flex justify-between border-b py-2">
             <div>
+ <ImageUploadBox
+  familyId={familyId}
+  memberId={contact.id}
+  photoUrl={contact.photoUrl}
+/>
+
               <p className="font-medium">{contact.name}</p>
               {contact.mobile && (
                 <p className="text-sm text-gray-500">

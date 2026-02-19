@@ -158,30 +158,82 @@ export default function EditMemberModal({
         {/* STUDENT SECTION */}
 
         {form.isStudent && (
-          <>
-            <StudentEducationSection
-              student={form}
-              update={updateField}
-            />
+  <>
+    {/* Gender */}
+    <label className="block text-sm font-medium mt-3">
+      Gender
+    </label>
+    <select
+      className="w-full border p-2 rounded mb-2"
+      value={form.gender}
+      onChange={e => updateField("gender", e.target.value)}
+    >
+      <option value="">Select</option>
+      <option>Male</option>
+      <option>Female</option>
+      <option>Other</option>
+    </select>
 
-            <button
-              onClick={() => {
-                setSkillCardIdx(0);
-                setShowSkills(true);
-              }}
-              className="w-full border-2 border-indigo-300 text-indigo-700 py-2 rounded mb-2"
-            >
-              🎯 Skills & Talents
-            </button>
+    {/* Birth Date */}
+    <label className="block text-sm font-medium">
+      Birth Date
+    </label>
+    <input
+      type="date"
+      className="w-full border p-2 rounded mb-2"
+      value={form.dob}
+      onChange={e => updateField("dob", e.target.value)}
+    />
 
-             {/* ⭐ FINANCIAL SUPPORT SECTION */}
+    {/* Stay Away Toggle */}
+    <label className="flex items-center gap-2 my-2">
+      <input
+        type="checkbox"
+        checked={form.stayAway || false}
+        onChange={e =>
+          updateField("stayAway", e.target.checked)
+        }
+      />
+      Staying away from family
+    </label>
 
+    {/* Stay City */}
+    {form.stayAway && (
+      <input
+        className="w-full border p-2 rounded mb-2"
+        placeholder="City where staying"
+        value={form.stayCity || ""}
+        onChange={e =>
+          updateField("stayCity", e.target.value)
+        }
+      />
+    )}
+
+    {/* Existing Education Section */}
+    <StudentEducationSection
+      student={form}
+      update={updateField}
+    />
+
+    {/* Skills Button */}
+    <button
+      onClick={() => {
+        setSkillCardIdx(0);
+        setShowSkills(true);
+      }}
+      className="w-full border-2 border-indigo-200 text-indigo-600 py-2 rounded mb-2"
+    >
+      🎯 Skills & Talents
+    </button>
+
+    {/* Financial Support Section */}
     <StudentFinancialSection
       student={form}
       update={updateField}
     />
-          </>
-        )}
+  </>
+)}
+
 
         {/* MEMBER SECTION */}
 
