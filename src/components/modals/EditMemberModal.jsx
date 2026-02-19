@@ -3,6 +3,15 @@ import { ref, update } from "firebase/database";
 import { db } from "../../firebase";
 import StudentEducationSection from "../StudentEducationSection";
 import StudentSkillsSection from "../StudentSkillsSection";
+import StudentFinancialSection from "../StudentFinancialSection";
+const EMPTY_SKILLS = {
+  indoorSports: [],
+  outdoorSports: [],
+  talents: [],
+  creative: [],
+  hobbies: [],
+  funActivities: []
+};
 
 export default function EditMemberModal({
   open,
@@ -10,102 +19,107 @@ export default function EditMemberModal({
   member,
   familyId
 }) {
- const [form, setForm] = useState({
-  name: "",
-  mobile: "",
-  email: "",
-  gender: "",
-  dob: "",
-  education: "",
-  occupation: "",
-  married: false,
-  isStudent: false,
-  skills: [],
-  helpRequired: ""
-});
+  const [form, setForm] = useState(null);
+  const [showSkills, setShowSkills] = useState(false);
+  const [skillCardIdx, setSkillCardIdx] = useState(0);
 
-const [showSkills, setShowSkills] = useState(false);
-const [skillCardIdx, setSkillCardIdx] = useState(0);
+  /* ================= LOAD MEMBER ================= */
 
-  // Load member into form
   useEffect(() => {
-    if (member) {
-      setForm({
-        name: member.name || "",
-        mobile: member.mobile || "",
-        email: member.email || "",
-        gender: member.gender || "",
-        dob: member.dob || "",
-        occupation: member.occupation || "",
-        married: member.married || false,
-        isStudent: member.isStudent || false,
+    if (!member) return;
 
-        // Student fields
-        educationType: member.educationType || "",
-        standard: member.standard || "",
-        stream: member.stream || "",
-        medium: member.medium || "",
-        year: member.year || "",
-        degree: member.degree || "",
-        specialization: member.specialization || "",
-        collegeName: member.collegeName || "",
-        courseName: member.courseName || "",
-        courseStage: member.courseStage || "",
-        exam: member.exam || "",
+    setForm({
+      name: member.name || "",
+      mobile: member.mobile || "",
+      email: member.email || "",
+      occupation: member.occupation || "",
+      married: member.married || false,
+      isStudent: member.isStudent || false,
 
-        skills: member.skills || "",
-        helpRequired: member.helpRequired || ""
-      });
-    }
+      educationType: member.educationType || "",
+      standard: member.standard || "",
+      stream: member.stream || "",
+      medium: member.medium || "",
+      year: member.year || "",
+      degree: member.degree || "",
+      specialization: member.specialization || "",
+      collegeName: member.collegeName || "",
+      courseName: member.courseName || "",
+      courseStage: member.courseStage || "",
+      exam: member.exam || "",
+
+      skills: member.skills || EMPTY_SKILLS,
+      helpRequired: member.helpRequired || ""
+    });
   }, [member]);
 
-  if (!open || !member) return null;
+  if (!open || !member || !form) return null;
 
-  // Update helper for education component
-  const updateField = (field, value) => {
+  /* ================= HELPERS ================= */
+
+  const updateField = (field, value) =>
     setForm(prev => ({ ...prev, [field]: value }));
+
+  const getEducationSummary = () => {
+    if (!form.isStudent) return "";
+
+    if (form.educationType === "School Student")
+      return form.standard;
+
+    if (form.educationType === "College Student")
+      return `${form.degree || ""} ${form.year || ""}`;
+
+    if (form.educationType === "Postgraduate")
+      return `PG ${form.year || ""}`;
+
+    if (form.educationType === "Diploma / ITI")
+      return `Diploma ${form.year || ""}`;
+
+    if (form.educationType === "Professional Course")
+      return `${form.courseName || ""} ${form.courseStage || ""}`;
+
+    if (form.educationType === "Competitive Prep")
+      return form.exam;
+
+    return "";
   };
 
+  /* ================= SAVE ================= */
 
-  // Save changes to RTDB
   const handleSave = async () => {
-    try {
-      await update(
-        ref(db, `families/${familyId}/members/${member.id}`),
-        {
-          ...form,
-          updatedAt: Date.now()
-        }
-      );
+    await update(
+      ref(db, `families/${familyId}/members/${member.id}`),
+      {
+        ...form,
+        education: getEducationSummary(),
+        updatedAt: Date.now()
+      }
+    );
 
-      onClose();
-
-    } catch (err) {
-      alert("Save failed");
-      console.error(err);
-    }
+    onClose();
   };
-  if (showSkills) {
-  return (
-    <StudentSkillsSection
-      student={form}
-      update={updateField}
-      cardIndex={skillCardIdx}
-      setCardIndex={setSkillCardIdx}
-      exitSkillsMode={() => setShowSkills(false)}
-    />
-  );
-}
 
+  /* ================= SKILLS MODE ================= */
+
+  if (showSkills) {
+    return (
+      <StudentSkillsSection
+        student={form}
+        update={updateField}
+        cardIndex={skillCardIdx}
+        setCardIndex={setSkillCardIdx}
+        exitSkillsMode={() => setShowSkills(false)}
+      />
+    );
+  }
+
+  /* ================= UI ================= */
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-
       <div className="bg-white rounded-lg p-5 w-full max-w-md max-h-[90vh] overflow-y-auto">
 
-        <h2 className="text-lg font-bold mb-4">
-          Edit Member
-        </h2>
+        <h2 className="text-lg font-bold mb-4">Edit Member</h2>
 
         {/* BASIC INFO */}
 
@@ -136,14 +150,12 @@ const [skillCardIdx, setSkillCardIdx] = useState(0);
           <input
             type="checkbox"
             checked={form.isStudent}
-            onChange={e =>
-              updateField("isStudent", e.target.checked)
-            }
+            onChange={e => updateField("isStudent", e.target.checked)}
           />
           Student
         </label>
 
-        {/* ⭐ STUDENT EDUCATION SECTION */}
+        {/* STUDENT SECTION */}
 
         {form.isStudent && (
           <>
@@ -152,29 +164,26 @@ const [skillCardIdx, setSkillCardIdx] = useState(0);
               update={updateField}
             />
 
-           <button
-  onClick={() => {
-    setSkillCardIdx(0);
-    setShowSkills(true);
-  }}
-  className="w-full border-2 border-indigo-200 text-indigo-600 py-2 rounded mb-2"
->
-  🎯 Skills & Talents
-</button>
+            <button
+              onClick={() => {
+                setSkillCardIdx(0);
+                setShowSkills(true);
+              }}
+              className="w-full border-2 border-indigo-300 text-indigo-700 py-2 rounded mb-2"
+            >
+              🎯 Skills & Talents
+            </button>
 
+             {/* ⭐ FINANCIAL SUPPORT SECTION */}
 
-            <input
-              className="w-full border p-2 rounded mb-2"
-              placeholder="Help Required"
-              value={form.helpRequired}
-              onChange={e =>
-                updateField("helpRequired", e.target.value)
-              }
-            />
+    <StudentFinancialSection
+      student={form}
+      update={updateField}
+    />
           </>
         )}
 
-        {/* MEMBER FIELDS */}
+        {/* MEMBER SECTION */}
 
         {!form.isStudent && (
           <>
@@ -219,9 +228,6 @@ const [skillCardIdx, setSkillCardIdx] = useState(0);
         </div>
 
       </div>
-
-      
-      
     </div>
   );
 }
