@@ -5,7 +5,6 @@ import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import localforage from "localforage";
 
-
 export default function UniversalOnboardingPage() {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -14,86 +13,79 @@ export default function UniversalOnboardingPage() {
   const [family, setFamily] = useState(null);
   const [familyId, setFamilyId] = useState(null);
   const [pin, setPin] = useState("");
+  const [searching, setSearching] = useState(false);
 
   const supportsContacts = "contacts" in navigator;
 
   // 📱 PICK CONTACTS
   const pickContacts = async () => {
-  const picked = await navigator.contacts.select(
-    ["name", "tel"],
-    { multiple: true }
-  );
+    const picked = await navigator.contacts.select(
+      ["name", "tel"],
+      { multiple: true }
+    );
 
-  const numbers = picked
-    .map(c => c.tel?.[0]?.replace(/\D/g, ""))
-    .filter(Boolean)
-    .slice(0, 2);
+    const numbers = picked
+      .map(c => c.tel?.[0]?.replace(/\D/g, ""))
+      .filter(Boolean)
+      .slice(0, 2);
 
-  setMobiles(numbers);
+    setMobiles(numbers);
 
-  // 💾 SAVE to localforage
-  await localforage.setItem(
-    "pendingFamilyContacts",
-    numbers.map(m => ({ mobile: m }))
-  );
-};
-
+    await localforage.setItem(
+      "pendingFamilyContacts",
+      numbers.map(m => ({ mobile: m }))
+    );
+  };
 
   // ✏️ Update manual input
   const updateMobile = async (index, value) => {
-  const copy = [...mobiles];
-  copy[index] = value;
-  setMobiles(copy);
+    const copy = [...mobiles];
+    copy[index] = value;
+    setMobiles(copy);
 
-  // 💾 SAVE updated list
-  await localforage.setItem(
-    "pendingFamilyContacts",
-    copy
-      .filter(Boolean)
-      .map(m => ({ mobile: m }))
-  );
-};
+    await localforage.setItem(
+      "pendingFamilyContacts",
+      copy.filter(Boolean).map(m => ({ mobile: m }))
+    );
+  };
 
-
-  // 🔍 FIND FAMILY
+  // ✅ FIX: Use /mobileIndex — check each mobile number directly, no full scan
   const findFamily = async () => {
-    if (mobiles.some(m => !m)) {
-      alert("Enter at least two mobile numbers");
+    const filled = mobiles.filter(Boolean);
+    if (filled.length === 0) {
+      alert("Enter at least one mobile number");
       return;
     }
 
-    const clean = mobiles.map(m => m.replace(/\D/g, ""));
+    setSearching(true);
 
-    const snap = await get(ref(db, "families"));
-    let found = null;
-    let foundId = null;
+    let foundFamilyId = null;
 
-    snap.forEach(f => {
-      const contacts = f.val().familyContacts || {};
-
-      let matches = 0;
-
-      Object.values(contacts).forEach(c => {
-        const m = c.mobile?.replace(/\D/g, "");
-        if (clean.includes(m)) matches++;
-      });
-
-      if (matches >= 2) {
-        found = f.val();
-        foundId = f.key;
+    for (const m of filled) {
+      const clean = m.replace(/\D/g, "").slice(-10);
+      const snap = await get(ref(db, `mobileIndex/${clean}`));
+      if (snap.exists()) {
+        foundFamilyId = snap.val().familyId;
+        break;
       }
-    });
+    }
 
-    if (found) {
-      setFamily(found);
-      setFamilyId(foundId);
+    if (foundFamilyId) {
+      const famSnap = await get(ref(db, `families/${foundFamilyId}`));
+      if (famSnap.exists()) {
+        setFamily(famSnap.val());
+        setFamilyId(foundFamilyId);
+      }
     } else {
-        await localforage.setItem(
-    "pendingFamilyContacts",
-    clean.map(m => ({ mobile: m }))
-  );
+      const clean = filled.map(m => m.replace(/\D/g, ""));
+      await localforage.setItem(
+        "pendingFamilyContacts",
+        clean.map(m => ({ mobile: m }))
+      );
       navigate("/registration");
     }
+
+    setSearching(false);
   };
 
   // 🤝 JOIN FAMILY
@@ -119,7 +111,7 @@ export default function UniversalOnboardingPage() {
     <div className="max-w-md mx-auto p-6 space-y-5">
 
       <h2 className="text-xl font-bold text-center">
-        Wel Come to Kedavani Madal App
+        Welcome to Kedavani Mandal App
       </h2>
 
       {/* 📱 Contact Picker */}
@@ -138,7 +130,7 @@ export default function UniversalOnboardingPage() {
 
       {/* ✍️ Manual Entry */}
       <p className="text-sm text-center text-gray-600">
-        Enter at least two  members  mobile numbers
+        Enter family member mobile numbers
       </p>
 
       {mobiles.map((m, i) => (
@@ -146,16 +138,17 @@ export default function UniversalOnboardingPage() {
           key={i}
           placeholder={`Mobile ${i + 1}`}
           value={m}
-          onChange={(e)=>updateMobile(i, e.target.value)}
+          onChange={(e) => updateMobile(i, e.target.value)}
           className="w-full border p-3 rounded-lg"
         />
       ))}
 
       <button
         onClick={findFamily}
-        className="w-full bg-green-600 text-white p-3 rounded-lg"
+        disabled={searching}
+        className="w-full bg-green-600 text-white p-3 rounded-lg disabled:opacity-60"
       >
-        Next
+        {searching ? "Searching..." : "Next"}
       </button>
 
       {/* 👨‍👩‍👧 FAMILY FOUND */}
@@ -172,7 +165,7 @@ export default function UniversalOnboardingPage() {
           <input
             placeholder="Enter Family PIN"
             value={pin}
-            onChange={(e)=>setPin(e.target.value)}
+            onChange={(e) => setPin(e.target.value)}
             className="w-full border p-2 rounded"
           />
 
@@ -184,7 +177,7 @@ export default function UniversalOnboardingPage() {
           </button>
 
           <button
-            onClick={()=>navigate("/registration")}
+            onClick={() => navigate("/registration")}
             className="w-full border p-2 rounded"
           >
             Not My Family

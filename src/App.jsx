@@ -16,6 +16,8 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ConnectorsPage from "./pages/ConnectorsPage";
 import UniversalOnboardingPage from "./pages/UniversalOnboardingPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
+import ContactOnboardingPage from "./pages/ContactOnboardingPage";
+import RegisterList from "./pages/RegisterList";
 
 export default function App() {
   return (
@@ -33,27 +35,18 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
         <Route path="/leaderboard" element={<LeaderboardPage />} />
+        <Route path="/join" element={<JoinFamilyPage />} />
+        <Route path="/success" element={<RegistrationSuccess />} />
 
+        {/* ✅ Added missing routes */}
+        <Route path="/onboarding" element={<UniversalOnboardingPage />} />
+        <Route path="/contact-onboarding" element={<ContactOnboardingPage />} />
+        <Route path="/register-list" element={<RegisterList />} />
 
         {/* Private */}
-          <Route path="/onboarding" element={<UniversalOnboardingPage />} />
-        <Route
-          path="/dashboard"
-          element={<PrivateRoute><Dashboard /></PrivateRoute>}
-        />
-
-        <Route path="/success" element={<RegistrationSuccess />} />
-        <Route path="/join" element={<JoinFamilyPage />} />
-
-        <Route
-          path="/students"
-          element={<PrivateRoute><Students /></PrivateRoute>}
-        />
-
-        <Route
-          path="/profile"
-          element={<PrivateRoute><Profile /></PrivateRoute>}
-        />
+        <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+        <Route path="/students"  element={<PrivateRoute><Students /></PrivateRoute>} />
+        <Route path="/profile"   element={<PrivateRoute><Profile /></PrivateRoute>} />
 
       </Route>
 

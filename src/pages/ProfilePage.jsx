@@ -12,14 +12,15 @@ export default function ProfilePage() {
       const user = getAuth().currentUser;
       if (!user) return;
 
-      const snap = await get(ref(db, "families"));
+      // ✅ FIX: Read familyId from /users/{uid} — no full families scan
+      const uidSnap = await get(ref(db, `users/${user.uid}/familyId`));
+      if (!uidSnap.exists()) return;
 
-      snap.forEach(f => {
-        if (f.child("members").hasChild(user.uid)) {
-          setFamilyId(f.key);
-          setFamily(f.val());
-        }
-      });
+      const famId = uidSnap.val();
+      setFamilyId(famId);
+
+      const famSnap = await get(ref(db, `families/${famId}`));
+      if (famSnap.exists()) setFamily(famSnap.val());
     };
 
     loadFamily();
@@ -29,7 +30,12 @@ export default function ProfilePage() {
 
   const regeneratePin = async () => {
     const newPin = Math.floor(1000 + Math.random() * 9000);
+    // ✅ Also update the PIN index so lookups stay accurate
     await update(ref(db, `families/${familyId}`), { familyPin: newPin });
+    await update(ref(db, `familyPins`), {
+      [family.familyPin]: null,   // remove old pin
+      [newPin]: familyId          // add new pin
+    });
     setFamily({ ...family, familyPin: newPin });
     alert("PIN updated");
   };
@@ -56,42 +62,42 @@ export default function ProfilePage() {
           Regenerate PIN
         </button>
       </div>
+
       <div className="bg-white p-4 rounded shadow">
-  <h3 className="font-semibold mb-2">Invite Family Member</h3>
+        <h3 className="font-semibold mb-2">Invite Family Member</h3>
 
-  <p className="text-sm text-gray-600 mb-2">
-    Share this link and PIN with family member to join.
-  </p>
+        <p className="text-sm text-gray-600 mb-2">
+          Share this link and PIN with family member to join.
+        </p>
 
-  <input
-    readOnly
-    value={`${window.location.origin}/join?familyId=${familyId}`}
-    className="border w-full p-2 rounded text-sm mb-2"
-  />
+        <input
+          readOnly
+          value={`${window.location.origin}/join?familyId=${familyId}`}
+          className="border w-full p-2 rounded text-sm mb-2"
+        />
 
-  <button
-    onClick={() => {
-      navigator.clipboard.writeText(
-        `${window.location.origin}/join?familyId=${familyId}`
-      );
-      alert("Invite link copied");
-    }}
-    className="w-full bg-blue-600 text-white p-2 rounded mb-2"
-  >
-    Copy Invite Link
-  </button>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(
+              `${window.location.origin}/join?familyId=${familyId}`
+            );
+            alert("Invite link copied");
+          }}
+          className="w-full bg-blue-600 text-white p-2 rounded mb-2"
+        >
+          Copy Invite Link
+        </button>
 
-  <button
-    onClick={() => {
-      const msg = `Join our family app.\nLink: ${window.location.origin}/join?familyId=${familyId}\nPIN: ${family.familyPin}`;
-      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`);
-    }}
-    className="w-full bg-green-600 text-white p-2 rounded"
-  >
-    Share on WhatsApp
-  </button>
-</div>
-
+        <button
+          onClick={() => {
+            const msg = `Join our family app.\nLink: ${window.location.origin}/join?familyId=${familyId}\nPIN: ${family.familyPin}`;
+            window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`);
+          }}
+          className="w-full bg-green-600 text-white p-2 rounded"
+        >
+          Share on WhatsApp
+        </button>
+      </div>
 
       {/* Family Contacts */}
       <div className="bg-white p-4 rounded shadow">

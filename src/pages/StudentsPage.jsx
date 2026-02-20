@@ -14,24 +14,35 @@ export default function StudentsPage() {
       const user = getAuth().currentUser;
       if (!user) return;
 
-      const snap = await get(ref(db, "families"));
+      // ✅ FIX: Read familyId from /users/{uid} — no full families scan
+      const uidSnap = await get(ref(db, `users/${user.uid}/familyId`));
+      if (!uidSnap.exists()) return;
 
-      snap.forEach(f => {
-        if (f.child("members").hasChild(user.uid)) {
-          setFamilyId(f.key);
-          setStudents(f.val().students || {});
-        }
+      const famId = uidSnap.val();
+      setFamilyId(famId);
+
+      const famSnap = await get(ref(db, `families/${famId}/members`));
+      if (!famSnap.exists()) return;
+
+      // Collect students from members
+      const allMembers = famSnap.val() || {};
+      const studentMap = {};
+      Object.entries(allMembers).forEach(([id, m]) => {
+        if (m.isStudent) studentMap[id] = m;
       });
+      setStudents(studentMap);
     };
 
     loadStudents();
   }, []);
 
   const deleteStudent = async (id) => {
+    // Only remove isStudent flag — don't delete the member
+    await update(ref(db, `families/${familyId}/members/${id}`), {
+      isStudent: false,
+    });
     const updated = { ...students };
     delete updated[id];
-
-    await update(ref(db, `families/${familyId}/students`), updated);
     setStudents(updated);
   };
 

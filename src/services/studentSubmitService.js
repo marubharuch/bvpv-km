@@ -1,85 +1,113 @@
-// submitFamilyRegistration — FINAL VERSION (Basic Family Registration)
-
-import { getDatabase, ref, push, set, get } from "firebase/database";
+import { getDatabase, ref, push, get, update } from "firebase/database";
 import { auth } from "../firebase";
 
-/**
- * Generate unique 4-digit Family PIN
- */
 const generateFamilyPin = async (db) => {
-  for (let i = 0; i < 10; i++) {
+  while (true) {
     const pin = Math.floor(1000 + Math.random() * 9000);
-
-    const snap = await get(ref(db, "families"));
-    let exists = false;
-
-    snap.forEach((child) => {
-      if (child.val()?.familyPin === pin) exists = true;
-    });
-
-    if (!exists) return pin;
+    const snap = await get(ref(db, `familyPins/${pin}`));
+    if (!snap.exists()) return pin;
   }
-
-  // fallback
-  return Math.floor(1000 + Math.random() * 9000);
 };
 
-/**
- * MAIN FUNCTION
- * Creates new family with basic data
- */
 export const submitFamilyRegistration = async (data) => {
   const db = getDatabase();
   const user = auth.currentUser;
 
-  if (!user) {
-    throw new Error("User not authenticated");
-  }
-
-  if (!data.city || !data.members?.length) {
+  if (!user) throw new Error("User not authenticated");
+  if (!data.city || !data.members?.length)
     throw new Error("City and members are required");
-  }
 
   try {
-    // 🥇 Generate Family ID
+    // 🔹 Create Family ID + PIN
     const familyRef = push(ref(db, "families"));
     const familyId = familyRef.key;
-
-    // 🥈 Generate PIN
     const familyPin = await generateFamilyPin(db);
 
-    // 🥉 Clean members (no relation, no extra fields)
-    const cleanMembers = data.members.map((m) => ({
-      name: m.name || "",
-      mobile: m.mobile || "",
-      isStudent: false // default
-    }));
+    const batchUpdates = {};
+    let headMemberId = null;
 
-    // 🏠 Save family
-    const familyData = {
+    // 🔹 Create members
+    data.members.forEach((m, i) => {
+      const memberId = `MEM_${Date.now()}_${i}`;
+      if (i === 0) headMemberId = memberId;
+
+      // Save full member data
+      batchUpdates[`members/${memberId}`] = {
+        name: m.name || "",
+        phone: m.mobile || "",
+        city: data.city.trim(),
+        native: data.native?.trim() || "",
+        isStudent: false,
+        isHead: i === 0,
+        relation: m.relation || (i === 0 ? "Head" : "Member"),
+      };
+
+      // Link member → family
+      batchUpdates[`families/${familyId}/members/${memberId}`] = true;
+
+      // Mobile index
+      if (m.mobile) {
+        const clean = m.mobile.replace(/\D/g, "").slice(-10);
+        if (clean.length === 10) {
+          batchUpdates[`mobileIndex/${clean}`] = { familyId, memberId };
+        }
+      }
+    });
+
+    const headMember = data.members[0];
+
+    // 🔹 Family info (NO members field here)
+    batchUpdates[`families/${familyId}`] = {
       city: data.city.trim(),
-      members: cleanMembers,
+      native: data.native?.trim() || "",
+      address: data.address?.trim() || "",
       ownerUid: user.uid,
       familyPin,
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     };
 
-    await set(familyRef, familyData);
-
-    // 👤 Link user → family
-    await set(ref(db, `users/${user.uid}`), {
+    // 🔹 User → family + member mapping
+    batchUpdates[`users/${user.uid}`] = {
       familyId,
+      memberId: headMemberId,
+      role: "admin",
       name: user.displayName || "",
       email: user.email || "",
-      joinedAt: Date.now()
-    });
-
-    return {
-      familyId,
-      familyPin,
-      message: "Family registered successfully"
+      joinedAt: Date.now(),
     };
+
+    // 🔹 Email index (for login mapping)
+    const emailKey = user.email
+      .trim()
+      .toLowerCase()
+      .replace(/\./g, ",")
+      .replace(/@/g, "_");
+
+    batchUpdates[`emailIndex/${emailKey}`] = {
+      email: user.email,
+      familyId,
+      memberId: headMemberId,
+      role: "admin",
+    };
+
+    // 🔹 PIN index
+    batchUpdates[`familyPins/${familyPin}`] = familyId;
+
+    // 🔹 Directory node
+    batchUpdates[`directory/${familyId}`] = {
+      headName: headMember?.name || "",
+      mobile: headMember?.mobile || "",
+      city: data.city.trim(),
+      native: data.native?.trim() || "",
+      memberCount: data.members.length,
+      pin: familyPin,
+      updatedAt: Date.now(),
+    };
+
+    await update(ref(db), batchUpdates);
+
+    return { familyId, familyPin, message: "Family registered successfully" };
 
   } catch (error) {
     console.error("Registration failed:", error);

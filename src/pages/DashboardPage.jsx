@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import EditMemberModal from "../components/modals/EditMemberModal";
 import ImageUploadBox from "../components/ImageUploadBox";
+import { Users, GraduationCap, Briefcase, Plus, RefreshCw, LogOut, ChevronRight, Phone, MapPin } from "lucide-react";
 
 export default function FamilyDashboardPage() {
   const { user } = useContext(AuthContext);
@@ -15,142 +16,349 @@ export default function FamilyDashboardPage() {
   const [familyId, setFamilyId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editingMember, setEditingMember] = useState(null);
+  const [activeTab, setActiveTab] = useState("all"); // all | students | contacts
 
-  /* ================= LOAD FAMILY ================= */
+const loadFamily = useCallback(async () => {
+  if (!user?.uid) return;
 
-  const loadFamily = useCallback(async () => {
-    if (!user?.uid) return;
+  setLoading(true);
 
-    const userSnap = await get(ref(db, `users/${user.uid}`));
-    const famId = userSnap.val()?.familyId;
-    if (!famId) return;
+  // 1️⃣ Get user's familyId
+  const userSnap = await get(ref(db, `users/${user.uid}`));
+  const famId = userSnap.val()?.familyId;
 
-    setFamilyId(famId);
-
-    const famSnap = await get(ref(db, `families/${famId}`));
-    setFamily(famSnap.val());
-
+  if (!famId) {
     setLoading(false);
-  }, [user]);
+    return;
+  }
 
-  useEffect(() => {
-    loadFamily();
-  }, [loadFamily]);
+  setFamilyId(famId);
 
-  /* ================= MEMBERS ================= */
+  // 2️⃣ Get family info
+  const famSnap = await get(ref(db, `families/${famId}`));
+  const famData = famSnap.val();
 
-  const members = family?.members
-    ? Object.entries(family.members).map(([id, m]) => ({ id, ...m }))
-    : [];
+  if (!famData) {
+    setLoading(false);
+    return;
+  }
 
+  // 3️⃣ Get member IDs from family
+  const memberIds = Object.keys(famData.members || {});
+
+  // 4️⃣ Fetch member details from /members
+  const membersData = [];
+
+  for (const id of memberIds) {
+    const mSnap = await get(ref(db, `members/${id}`));
+    if (mSnap.exists()) {
+      membersData.push({ id, ...mSnap.val() });
+    }
+  }
+
+  // 5️⃣ Merge into family object
+  setFamily({
+    ...famData,
+    members: membersData
+  });
+
+  setLoading(false);
+}, [user]);
+
+  useEffect(() => { loadFamily(); }, [loadFamily]);
+
+const members = family?.members || [];
+
+  const head = members.find(m => m.isHead) || members[0];
   const students = members.filter(m => m.isStudent);
   const contacts = members.filter(m => !m.isStudent);
 
-  /* ================= ACTIONS ================= */
+  const filteredMembers =
+    activeTab === "students" ? students :
+    activeTab === "contacts" ? contacts :
+    members;
 
-  const logout = async () => {
-    await signOut(auth);
-    navigate("/");
-  };
+  const logout = async () => { await signOut(auth); navigate("/"); };
 
-  const addStudent = () => navigate("/registration");
+  // ── LOADING ──
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-gray-500 text-sm">Loading your family...</p>
+        </div>
+      </div>
+    );
+  }
 
-  /* ================= UI ================= */
-
-  if (loading) return <div>Loading...</div>;
-  if (!family) return <div>No family</div>;
+  if (!family) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+        <div className="text-center">
+          <div className="text-5xl mb-4">👨‍👩‍👧</div>
+          <p className="text-gray-600 mb-4">No family found.</p>
+          <button onClick={() => navigate("/registration")} className="bg-blue-600 text-white px-5 py-2 rounded-lg">
+            Register Family
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-md mx-auto p-4 space-y-4">
+    <div className="max-w-md mx-auto pb-24 bg-gray-50 min-h-screen">
 
-      {/* HEADER */}
+      {/* ── HERO BANNER ── */}
+      <div className="bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-700 text-white px-5 pt-5 pb-8 relative overflow-hidden">
+        {/* Decorative circles */}
+        <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white opacity-5" />
+        <div className="absolute -bottom-10 -left-4 w-40 h-40 rounded-full bg-white opacity-5" />
 
-      <div className="flex justify-between">
-        <button onClick={loadFamily}>🔄 Refresh</button>
-        <button onClick={logout}>Logout</button>
-      </div>
-
-      {/* FAMILY PROFILE */}
-
-      <div className="bg-white p-4 rounded shadow">
-        <h2 className="font-bold mb-2">Family Profile</h2>
-
-        <p>PIN: <b>{family.familyPin}</b></p>
-        <p>City: {family.city || "Not set"}</p>
-        <p>Native: {family.native || "Not set"}</p>
-        <p>Address: {family.address || "Not set"}</p>
-      </div>
-
-      {/* STUDENTS */}
-
-      <div className="bg-white p-4 rounded shadow">
-        <div className="flex justify-between mb-2">
-          <h3>Students ({students.length})</h3>
-          <button onClick={addStudent}>+ Add</button>
+        {/* Top bar */}
+        <div className="flex justify-between items-center mb-5 relative">
+          <button onClick={loadFamily} className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+            <RefreshCw size={14} />
+          </button>
+          <button onClick={logout} className="flex items-center gap-1 text-xs bg-white/20 px-3 py-1.5 rounded-full">
+            <LogOut size={12} /> Logout
+          </button>
         </div>
 
-        {students.map(student => (
-          <div key={student.id} className="flex justify-between border-b py-2">
-            <div>
+        {/* Family identity */}
+        <div className="flex items-center gap-4 relative">
+          <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center text-3xl flex-shrink-0">
+            👨‍👩‍👧
+          </div>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-bold leading-tight">
+              {head?.name?.split(" ").slice(-1)[0] || "My"} Family
+            </h1>
+            <div className="flex items-center gap-1 text-blue-100 text-xs mt-1">
+              <MapPin size={11} />
+              <span>{family.city || "—"}</span>
+              {family.native && <span>· Native: {family.native}</span>}
+            </div>
+            <div className="mt-1.5">
+              <span className="bg-white/25 text-white text-xs font-semibold px-2.5 py-0.5 rounded-full">
+                PIN: {family.familyPin}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Stat strip */}
+        <div className="grid grid-cols-3 gap-2 mt-5 relative">
+          {[
+            { icon: <Users size={16} />, label: "Members", count: members.length, color: "bg-white/20" },
+            { icon: <GraduationCap size={16} />, label: "Students", count: students.length, color: "bg-green-500/30" },
+            { icon: <Briefcase size={16} />, label: "Working", count: contacts.filter(m => m.occupation && m.occupation !== "Homemaker").length, color: "bg-purple-500/30" },
+          ].map((s, i) => (
+            <div key={i} className={`${s.color} rounded-xl p-3 text-center`}>
+              <div className="flex justify-center mb-1 opacity-80">{s.icon}</div>
+              <div className="text-2xl font-bold leading-none">{s.count}</div>
+              <div className="text-xs opacity-75 mt-0.5">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── MEMBER AVATAR STRIP ── */}
+      <div className="px-4 -mt-4 relative z-10">
+        <div className="bg-white rounded-2xl shadow-md p-4">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Family Members</h3>
+          <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+            {members.map(m => (
+              <button
+                key={m.id}
+                onClick={() => setEditingMember(m)}
+                className="flex flex-col items-center flex-shrink-0 gap-1"
+              >
+                <div className={`w-14 h-14 rounded-full overflow-hidden border-2 ${m.isHead ? "border-blue-500" : m.isStudent ? "border-green-400" : "border-gray-200"} bg-gray-100 flex items-center justify-center`}>
+                  {m.photoUrl ? (
+                    <img src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-xl font-bold text-gray-400">
+                      {(m.name || "?")[0].toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-600 max-w-[56px] truncate text-center leading-tight">
+                  {m.name?.split(" ")[0] || "—"}
+                </span>
+                {m.isHead && <span className="text-xs text-blue-500 -mt-1">Head</span>}
+              </button>
+            ))}
+
+            {/* Add member button */}
+            <button
+              onClick={() => navigate("/registration")}
+              className="flex flex-col items-center flex-shrink-0 gap-1"
+            >
+              <div className="w-14 h-14 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400">
+                <Plus size={22} />
+              </div>
+              <span className="text-xs text-gray-400">Add</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── TAB FILTER ── */}
+      <div className="px-4 mt-4">
+        <div className="bg-gray-200 rounded-xl p-1 flex">
+          {[
+            { key: "all", label: `All (${members.length})` },
+            { key: "students", label: `Students (${students.length})` },
+            { key: "contacts", label: `Others (${contacts.length})` },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                activeTab === tab.key
+                  ? "bg-white text-blue-600 shadow"
+                  : "text-gray-500"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── MEMBER CARDS ── */}
+      <div className="px-4 mt-3 space-y-2">
+        {filteredMembers.length === 0 && (
+          <div className="bg-white rounded-xl p-6 text-center text-gray-400 text-sm">
+            No members in this category
+          </div>
+        )}
+
+        {filteredMembers.map(member => (
+          <div
+            key={member.id}
+            className="bg-white rounded-xl shadow-sm overflow-hidden"
+          >
+            <div className="flex items-center gap-3 p-3">
+              {/* Photo */}
               <ImageUploadBox
-  familyId={familyId}
-  memberId={student.id}
-  photoUrl={student.photoUrl}
-/>
+                familyId={familyId}
+                memberId={member.id}
+                photoUrl={member.photoUrl}
+              />
 
-              <p className="font-medium">{student.name}</p>
-              <p className="text-sm text-gray-500">
-                {student.education || "Add Education"}
-              </p>
-            </div>
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-gray-800 truncate">{member.name || "—"}</p>
+                  {member.isHead && (
+                    <span className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full flex-shrink-0">Head</span>
+                  )}
+                  {member.isStudent && (
+                    <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full flex-shrink-0">Student</span>
+                  )}
+                </div>
 
-            <button onClick={() => setEditingMember(student)}>
-              ✏️
-            </button>
-          </div>
-        ))}
-      </div>
+                <div className="flex items-center gap-1 text-gray-400 text-xs mt-0.5">
+                  {member.mobile && (
+                    <>
+                      <Phone size={10} />
+                      <span>{member.mobile}</span>
+                    </>
+                  )}
+                </div>
 
-      {/* CONTACTS */}
-
-      <div className="bg-white p-4 rounded shadow">
-        <h3 className="mb-2">Family Contacts ({contacts.length})</h3>
-
-        {contacts.map(contact => (
-          <div key={contact.id} className="flex justify-between border-b py-2">
-            <div>
- <ImageUploadBox
-  familyId={familyId}
-  memberId={contact.id}
-  photoUrl={contact.photoUrl}
-/>
-
-              <p className="font-medium">{contact.name}</p>
-              {contact.mobile && (
-                <p className="text-sm text-gray-500">
-                  📱 {contact.mobile}
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {member.isStudent
+                    ? member.education || member.educationType || "Student"
+                    : member.occupation || member.relation || "Member"}
                 </p>
-              )}
-            </div>
+              </div>
 
-            <button onClick={() => setEditingMember(contact)}>
-              ✏️
-            </button>
+              {/* Edit button */}
+              <button
+                onClick={() => setEditingMember(member)}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 flex-shrink-0"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
         ))}
       </div>
 
-      {/* EDIT MODAL */}
+      {/* ── QUICK ACTIONS ── */}
+      <div className="px-4 mt-4">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Quick Actions</h3>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => navigate("/registration")}
+            className="bg-white rounded-xl p-4 shadow-sm flex flex-col items-center gap-2 active:scale-95 transition-transform"
+          >
+            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+              <GraduationCap size={20} className="text-blue-600" />
+            </div>
+            <span className="text-xs font-medium text-gray-700 text-center">Add Student Info</span>
+          </button>
 
+          <button
+            onClick={() => {
+              const msg = `Join our family app.\nLink: ${window.location.origin}/join?familyId=${familyId}\nPIN: ${family.familyPin}`;
+              navigator.clipboard.writeText(msg);
+              alert("Invite copied!");
+            }}
+            className="bg-white rounded-xl p-4 shadow-sm flex flex-col items-center gap-2 active:scale-95 transition-transform"
+          >
+            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-xl">
+              📲
+            </div>
+            <span className="text-xs font-medium text-gray-700 text-center">Invite Member</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── FAMILY INFO CARD ── */}
+      <div className="px-4 mt-3">
+        <div className="bg-white rounded-xl shadow-sm p-4">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Family Details</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">City</span>
+              <span className="font-medium text-gray-800">{family.city || "—"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Native</span>
+              <span className="font-medium text-gray-800">{family.native || "—"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Address</span>
+              <span className="font-medium text-gray-800 text-right max-w-[60%]">{family.address || "—"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Family PIN</span>
+              <span className="font-bold text-blue-600">{family.familyPin}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── EDIT MODAL ── */}
       <EditMemberModal
         open={!!editingMember}
         member={editingMember}
         familyId={familyId}
-        onClose={() => {
-          setEditingMember(null);
-          loadFamily();
-        }}
+        onClose={() => { setEditingMember(null); loadFamily(); }}
       />
+
+      {/* ── FAB ── */}
+      <button
+        onClick={() => navigate("/registration")}
+        className="fixed bottom-20 right-4 w-14 h-14 bg-blue-600 text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-95 transition-transform"
+        title="Add member"
+      >
+        <Plus size={26} />
+      </button>
 
     </div>
   );

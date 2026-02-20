@@ -6,6 +6,10 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword
 } from "firebase/auth";
+
+import { ref, get, set } from "firebase/database";
+import { db } from "../firebase";
+
 import { useNavigate } from "react-router-dom";
 
 export default function AuthPage() {
@@ -16,29 +20,81 @@ export default function AuthPage() {
   const navigate = useNavigate();
   const auth = getAuth();
 
-  // 🔵 Google Login
+  // 🧠 🔗 AUTO CONNECT FAMILY IF EMAIL EXISTS
+  const connectFamily = async (user) => {
+  if (!user?.email) return false;
+
+  const emailKey = user.email
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, ",")
+    .replace(/@/g, "_");
+
+  console.log("Searching:", `users/${emailKey}`);
+
+  const indexSnap = await get(ref(db, `users/${emailKey}`));
+
+  if (!indexSnap.exists()) {
+    console.log("❌ Email not found");
+    return false;
+  }
+
+  const { familyId } = indexSnap.val();
+
+  await set(ref(db, `users/${user.uid}/familyId`), familyId);
+
+  return true;
+};
+
+  // 🔵 GOOGLE LOGIN
   const loginWithGoogle = async () => {
-    const provider = new GoogleAuthProvider();
-    const res = await signInWithPopup(auth, provider);
-    navigate("/registration");
+    try {
+      const provider = new GoogleAuthProvider();
+      const res = await signInWithPopup(auth, provider);
+
+      const mapped = await connectFamily(res.user);
+
+      // 🔁 Redirect logic
+      if (mapped) navigate("/dashboard");
+      else navigate("/registration");
+
+    } catch (e) {
+      alert("Google login failed");
+    }
   };
 
-  // 🔵 Email Login
+  // 🔵 EMAIL LOGIN
   const login = async () => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigate("/dashboard");
+      const res = await signInWithEmailAndPassword(auth, email, password);
+
+      const mapped = await connectFamily(res.user);
+
+      if (mapped) navigate("/dashboard");
+      else navigate("/registration");
+
     } catch {
       alert("Invalid email or password");
     }
   };
 
-  // 🟢 Email Register
+  // 🟢 REGISTER
   const register = async () => {
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      navigate("/registration");
+      const res = await createUserWithEmailAndPassword(auth, email, password);
+
+      const mapped = await connectFamily(res.user);
+
+    if (mapped) {
+        console.log("✅ User found in database. Navigating to Dashboard.");
+        navigate("/dashboard");
+      } else {
+        console.log("ℹ️ User not found. Navigating to Registration.");
+        navigate("/registration");
+      }
+
     } catch (e) {
+      console.error("❌ Authentication Error:", e.message);
       alert(e.message);
     }
   };
@@ -48,7 +104,7 @@ export default function AuthPage() {
 
       {/* 🟣 Title */}
       <h1 className="text-2xl font-bold text-center text-blue-900">
-        Community App
+        Community App 2
       </h1>
 
       {/* 🔴 Google */}
@@ -59,7 +115,6 @@ export default function AuthPage() {
         Continue with Google
       </button>
 
-      {/* OR */}
       <div className="text-center text-gray-400">OR</div>
 
       {/* 🔵 Tabs */}
@@ -67,9 +122,7 @@ export default function AuthPage() {
         <button
           onClick={() => setTab("login")}
           className={`flex-1 p-2 ${
-            tab === "login"
-              ? "bg-blue-600 text-white"
-              : "bg-gray-100"
+            tab === "login" ? "bg-blue-600 text-white" : "bg-gray-100"
           }`}
         >
           Login
@@ -78,9 +131,7 @@ export default function AuthPage() {
         <button
           onClick={() => setTab("register")}
           className={`flex-1 p-2 ${
-            tab === "register"
-              ? "bg-green-600 text-white"
-              : "bg-gray-100"
+            tab === "register" ? "bg-green-600 text-white" : "bg-gray-100"
           }`}
         >
           Register

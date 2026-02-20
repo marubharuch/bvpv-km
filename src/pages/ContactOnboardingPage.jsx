@@ -3,6 +3,7 @@ import { ref, get, update } from "firebase/database";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import localforage from "localforage";
 
 export default function ContactOnboardingPage() {
   const { user } = useContext(AuthContext);
@@ -32,34 +33,32 @@ export default function ContactOnboardingPage() {
 
     setContacts(mobiles);
     await localforage.setItem("onboardingContacts", mobiles);
-    checkFamilies(mobiles);
+    checkFamiliesByMobile(mobiles);
   };
 
-  // 🔍 Check Families
-  const checkFamilies = async (mobiles) => {
+  // ✅ FIX: Use /mobileIndex instead of full families scan
+  const checkFamiliesByMobile = async (mobiles) => {
     setChecking(true);
 
-    const snap = await get(ref(db, "families"));
-    let found = null;
-    let foundId = null;
+    let foundFamilyId = null;
 
-    snap.forEach(f => {
-      const contacts = f.val().familyContacts || {};
+    for (const mobile of mobiles) {
+      const clean = mobile.replace(/\D/g, "").slice(-10);
+      const snap = await get(ref(db, `mobileIndex/${clean}`));
+      if (snap.exists()) {
+        foundFamilyId = snap.val().familyId;
+        break;
+      }
+    }
 
-      Object.values(contacts).forEach(c => {
-        const m = c.mobile?.replace(/\D/g, "");
-        if (mobiles.includes(m)) {
-          found = f.val();
-          foundId = f.key;
-        }
-      });
-    });
-
-    if (found) {
-      setFamily(found);
-      setFamilyId(foundId);
+    if (foundFamilyId) {
+      const famSnap = await get(ref(db, `families/${foundFamilyId}`));
+      if (famSnap.exists()) {
+        setFamily(famSnap.val());
+        setFamilyId(foundFamilyId);
+      }
     } else {
-      navigate("/registration"); // 🔴 No family found
+      navigate("/registration");
     }
 
     setChecking(false);
@@ -121,7 +120,7 @@ export default function ContactOnboardingPage() {
             type="number"
             placeholder="Enter Family PIN"
             value={pin}
-            onChange={(e)=>setPin(e.target.value)}
+            onChange={(e) => setPin(e.target.value)}
             className="w-full border p-2 rounded"
           />
 
@@ -133,7 +132,7 @@ export default function ContactOnboardingPage() {
           </button>
 
           <button
-            onClick={()=>navigate("/registration")}
+            onClick={() => navigate("/registration")}
             className="w-full border p-2 rounded"
           >
             Not My Family
