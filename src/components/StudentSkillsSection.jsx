@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-const steps = [
-  { key: "indoorSports", title: "Indoor Sports", options: ["Chess", "Carrom", "TT"] },
-  { key: "outdoorSports", title: "Outdoor Sports", options: ["Cricket", "Badminton"] },
-  { key: "talents", title: "Talents", options: ["Singing", "Dancing", "Anchoring", "Acting"] },
-  { key: "creative", title: "Creative Skills", options: ["Reel Making", "Content Writing"] },
-  { key: "hobbies", title: "Hobbies", options: ["Tracking"] },
-  { key: "funActivities", title: "Fun Activities", options: ["Antakshari", "Quiz", "One Minute"] },
-  { key: "about", title: "Achievements & About", options: [] }
+const SKILL_STEPS = [
+  { key: "indoorSports",  title: "Indoor Sports",       emoji: "🏓", options: ["Chess", "Carrom", "TT", "Badminton (Indoor)", "Snooker"] },
+  { key: "outdoorSports", title: "Outdoor Sports",      emoji: "🏏", options: ["Cricket", "Badminton", "Football", "Kabaddi", "Athletics"] },
+  { key: "talents",       title: "Talents",             emoji: "🎤", options: ["Singing", "Dancing", "Anchoring", "Acting", "Public Speaking"] },
+  { key: "creative",      title: "Creative Skills",     emoji: "🎨", options: ["Reel Making", "Content Writing", "Photography", "Drawing", "Craft"] },
+  { key: "hobbies",       title: "Hobbies",             emoji: "📖", options: ["Trekking", "Reading", "Gardening", "Cooking", "Travel"] },
+  { key: "funActivities", title: "Fun Activities",      emoji: "🎉", options: ["Antakshari", "Quiz", "One Minute Games", "Dumb Charades"] },
+  { key: "about",         title: "About & Achievements",emoji: "🏆", options: [] }
 ];
 
 export default function StudentSkillsSection({
@@ -17,115 +17,221 @@ export default function StudentSkillsSection({
   setCardIndex,
   exitSkillsMode
 }) {
-  const step = steps[cardIndex];
   const [customInput, setCustomInput] = useState("");
 
+  const step = SKILL_STEPS[cardIndex];
+  const isAboutCard = step.key === "about";
+
+  // ✅ Clear custom input when switching cards
+  useEffect(() => {
+    setCustomInput("");
+  }, [cardIndex]);
+
   const selected = student.skills?.[step.key] || [];
+  const selectedCount = selected.length;
 
   const toggleSkill = (skill) => {
     const current = student.skills || {};
     const list = current[step.key] || [];
-
     const updated = list.includes(skill)
       ? list.filter(s => s !== skill)
       : [...list, skill];
-
     update("skills", { ...current, [step.key]: updated });
   };
 
   const addCustom = () => {
-    if (!customInput.trim()) return;
-    toggleSkill(customInput.trim());
+    const trimmed = customInput.trim();
+    if (!trimmed) return;
+    toggleSkill(trimmed);
     setCustomInput("");
   };
 
-  const nextCard = () => {
-    if (cardIndex < steps.length - 1) setCardIndex(cardIndex + 1);
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") addCustom();
   };
 
-  const prevCard = () => {
-    if (cardIndex > 0) setCardIndex(cardIndex - 1);
-  };
+  const goNext = () => { if (cardIndex < SKILL_STEPS.length - 1) setCardIndex(cardIndex + 1); };
+  const goPrev = () => { if (cardIndex > 0) setCardIndex(cardIndex - 1); };
+
+  const progressPct = ((cardIndex + 1) / SKILL_STEPS.length) * 100;
+
+  // Custom skills = selected items that aren't in the predefined options
+  const customSkills = selected.filter(s => !step.options.includes(s));
 
   return (
-    <div className="fixed inset-0 bg-[#ece9e1] flex items-center justify-center z-40 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-5 transition-all duration-300">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
 
-        {/* Header */}
-        <div className="flex items-center justify-between mb-2">
-          <button onClick={prevCard} disabled={cardIndex===0} className="text-blue-600 text-xl">⬅</button>
-          <div className="text-center">
-            <h3 className="font-bold text-green-700">{step.title}</h3>
-            <p className="text-xs text-gray-500">{cardIndex+1} / {steps.length}</p>
+        {/* ── HEADER ── */}
+        <div className="px-5 pt-5 pb-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium text-gray-400">
+              Step {cardIndex + 1} of {SKILL_STEPS.length}
+            </span>
+            {/* ✅ Exit button always visible */}
+            <button
+              onClick={exitSkillsMode}
+              className="text-gray-400 hover:text-gray-600 text-lg font-bold leading-none"
+              aria-label="Exit skills section"
+            >
+              ✕
+            </button>
           </div>
-          <button onClick={nextCard} disabled={cardIndex===steps.length-1} className="text-blue-600 text-xl">➡</button>
+
+          {/* Progress bar */}
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-4">
+            <div
+              className="h-full bg-green-500 rounded-full transition-all duration-400"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+
+          {/* Title */}
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-2xl">{step.emoji}</span>
+            <h3 className="text-lg font-bold text-gray-800">{step.title}</h3>
+          </div>
+
+          {/* Selected count badge */}
+          {!isAboutCard && (
+            <p className="text-xs text-gray-400">
+              {selectedCount === 0
+                ? "Tap to select all that apply"
+                : <span className="text-green-600 font-semibold">{selectedCount} selected ✓</span>
+              }
+            </p>
+          )}
         </div>
 
-        <div className="h-1 bg-gray-200 rounded mb-4">
-          <div
-            className="h-1 bg-green-500 rounded"
-            style={{ width: `${((cardIndex+1)/steps.length)*100}%` }}
-          />
-        </div>
+        {/* ── SKILL CARDS ── */}
+        <div className="px-5 pb-3 max-h-[50vh] overflow-y-auto">
 
-        {/* Normal skill cards */}
-        {step.key !== "about" && (
-          <>
-            <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-              {step.options.map(skill => (
-                <label key={skill} className="flex items-center gap-2 bg-gray-50 p-2 rounded">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(skill)}
-                    onChange={() => toggleSkill(skill)}
-                  />
-                  {skill}
+          {!isAboutCard && (
+            <>
+              {/* Predefined options as tap cards */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {step.options.map(skill => {
+                  const checked = selected.includes(skill);
+                  return (
+                    <button
+                      key={skill}
+                      type="button"
+                      onClick={() => toggleSkill(skill)}
+                      className={`flex items-center gap-2 p-3 rounded-xl border-2 text-left transition-all text-sm ${
+                        checked
+                          ? "border-green-400 bg-green-50 text-green-800 font-medium"
+                          : "border-gray-200 bg-gray-50 text-gray-600"
+                      }`}
+                    >
+                      <span className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center text-xs ${
+                        checked ? "border-green-500 bg-green-500 text-white" : "border-gray-300"
+                      }`}>
+                        {checked && "✓"}
+                      </span>
+                      {skill}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* ✅ Show custom skills that have been added */}
+              {customSkills.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs font-medium text-gray-500 mb-1">Added by you:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {customSkills.map(skill => (
+                      <button
+                        key={skill}
+                        type="button"
+                        onClick={() => toggleSkill(skill)}
+                        className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs px-2.5 py-1 rounded-full"
+                      >
+                        {skill}
+                        <span className="text-indigo-400 ml-0.5">✕</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom input */}
+              <div className="flex gap-2">
+                <input
+                  value={customInput}
+                  onChange={e => setCustomInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Add something else..."
+                  className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+                <button
+                  onClick={addCustom}
+                  disabled={!customInput.trim()}
+                  className="bg-green-600 text-white px-4 rounded-xl text-sm font-medium disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── ABOUT CARD ── */}
+          {isAboutCard && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">
+                  🏅 Achievements
                 </label>
-              ))}
+                <textarea
+                  placeholder="Competitions won, awards received, certificates..."
+                  value={student.achievements || ""}
+                  onChange={e => update("achievements", e.target.value)}
+                  rows={3}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">
+                  👤 About This Student
+                </label>
+                <textarea
+                  placeholder="A short intro — personality, goals, interests..."
+                  value={student.aboutMe || ""}
+                  onChange={e => update("aboutMe", e.target.value)}
+                  rows={3}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
+                />
+              </div>
             </div>
+          )}
+        </div>
 
-            <div className="flex gap-2 mb-3">
-              <input
-                value={customInput}
-                onChange={(e)=>setCustomInput(e.target.value)}
-                placeholder="Add other..."
-                className="border-b border-black bg-transparent flex-1"
-              />
-              <button onClick={addCustom} className="bg-blue-600 text-white px-3 rounded">Add</button>
-            </div>
-          </>
-        )}
-
-        {/* Achievements card */}
-        {step.key === "about" && (
-          <>
-            <h4 className="font-semibold mb-2">Achievements</h4>
-            <textarea
-              placeholder="Competitions, awards..."
-              value={student.achievements || ""}
-              onChange={(e)=>update("achievements", e.target.value)}
-              className="border w-full p-2 rounded text-sm mb-3"
-            />
-
-            <h4 className="font-semibold mb-2">About Student</h4>
-            <textarea
-              placeholder="Write something..."
-              value={student.aboutMe || ""}
-              onChange={(e)=>update("aboutMe", e.target.value)}
-              className="border w-full p-2 rounded text-sm"
-            />
-          </>
-        )}
-
-        {/* Finish Button */}
-        {cardIndex === steps.length - 1 && (
+        {/* ── FOOTER NAVIGATION ── */}
+        <div className="px-5 py-4 border-t border-gray-100 flex gap-2">
           <button
-            onClick={exitSkillsMode}
-            className="w-full bg-green-600 text-white p-2 rounded mt-4"
+            onClick={goPrev}
+            disabled={cardIndex === 0}
+            className="flex-1 border border-gray-200 py-2.5 rounded-xl text-sm font-medium text-gray-600 disabled:opacity-30"
           >
-            Finish Skills Section
+            ← Back
           </button>
-        )}
+
+          {cardIndex < SKILL_STEPS.length - 1 ? (
+            <button
+              onClick={goNext}
+              className="flex-1 bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold"
+            >
+              Next →
+            </button>
+          ) : (
+            <button
+              onClick={exitSkillsMode}
+              className="flex-1 bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold"
+            >
+              ✅ Done
+            </button>
+          )}
+        </div>
 
       </div>
     </div>

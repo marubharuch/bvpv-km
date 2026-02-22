@@ -1,1 +1,9 @@
+
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Gujarati:wght@300;400;500;600;700&display=swap');
+
 @import "tailwindcss";
+
+/* Gujarati font — display=swap means text shows immediately in fallback font while this loads */
+
+.gu { font-family: 'Noto Sans Gujarati', sans-serif; }

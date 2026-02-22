@@ -4,12 +4,12 @@ import { ref, get, set } from "firebase/database";
 import { db, auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import EditMemberModal from "../components/modals/EditMemberModal";  // ✅ same import, no rename
+import EditMemberModal from "../components/modals/EditMemberModal";
 import ImageUploadBox from "../components/ImageUploadBox";
 import { Users, GraduationCap, Briefcase, Plus, RefreshCw, LogOut, ChevronRight, Phone, MapPin } from "lucide-react";
-import { loadCache, saveCache, invalidateCache } from "../utils/cache";
+import { loadCache, saveCache, invalidateCache } from "../utils/cache"; // ✅ import cache utils
 
-export default function DashboardPage() {
+export default function FamilyDashboardPage() {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
 
@@ -17,55 +17,92 @@ export default function DashboardPage() {
   const [familyId, setFamilyId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editingMember, setEditingMember] = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false); // ✅ NEW
   const [activeTab, setActiveTab] = useState("all");
 
   const loadFamily = useCallback(async (forceRefresh = false) => {
-    if (!user) { setLoading(false); return; }
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
+
     const CACHE_KEY = `family_${user.uid}`;
 
+    // ✅ Try cache first
     if (!forceRefresh) {
       const cached = await loadCache(CACHE_KEY);
       if (cached) {
         setFamily(cached.family);
         setFamilyId(cached.familyId);
         setLoading(false);
-        return;
+        return; // ← zero Firebase reads
       }
     }
 
+    // 1️⃣ Get user's familyId (UID first)
     let famId = null;
-    const uidSnap = await get(ref(db, `users/${user.uid}`));
-    if (uidSnap.exists()) famId = uidSnap.val()?.familyId;
 
+    const uidSnap = await get(ref(db, `users/${user.uid}`));
+    if (uidSnap.exists()) {
+      famId = uidSnap.val()?.familyId;
+    }
+
+    // 🟡 FALLBACK — old users stored by emailKey
     if (!famId && user?.email) {
-      const emailKey = user.email.toLowerCase().replace(/\./g, ",").replace(/@/g, "_");
+      const emailKey = user.email
+        .toLowerCase()
+        .replace(/\./g, ",")
+        .replace(/@/g, "_");
+
       const emailSnap = await get(ref(db, `users/${emailKey}`));
+
       if (emailSnap.exists()) {
         const oldData = emailSnap.val();
         famId = oldData.familyId;
-        await set(ref(db, `users/${user.uid}`), { ...oldData, email: user.email });
+
+        // Auto-migrate to UID-based key
+        await set(ref(db, `users/${user.uid}`), {
+          ...oldData,
+          email: user.email
+        });
       }
     }
 
-    if (!famId) { setLoading(false); return; }
+    if (!famId) {
+      setLoading(false);
+      return;
+    }
 
+    // 2️⃣ Get family info
     const famSnap = await get(ref(db, `families/${famId}`));
     const famData = famSnap.val();
-    if (!famData) { setLoading(false); return; }
 
+    if (!famData) {
+      setLoading(false);
+      return;
+    }
+
+    // 3️⃣ Get member IDs from family
     const memberIds = Object.keys(famData.members || {});
-    const snapshots = await Promise.all(memberIds.map(id => get(ref(db, `members/${id}`))));
-    const membersData = snapshots.filter(s => s.exists()).map(s => ({ id: s.key, ...s.val() }));
+
+    // 4️⃣ Fetch all members in parallel ✅ (faster than sequential for loop)
+    const snapshots = await Promise.all(
+      memberIds.map(id => get(ref(db, `members/${id}`)))
+    );
+    const membersData = snapshots
+      .filter(s => s.exists())
+      .map(s => ({ id: s.key, ...s.val() }));
 
     const familyResult = { ...famData, members: membersData };
+
+    // ✅ Save to cache
     await saveCache(CACHE_KEY, { family: familyResult, familyId: famId });
 
     setFamilyId(famId);
     setFamily(familyResult);
     setLoading(false);
+
   }, [user]);
 
   useEffect(() => { loadFamily(); }, [loadFamily]);
@@ -80,22 +117,14 @@ export default function DashboardPage() {
     activeTab === "contacts" ? contacts :
     members;
 
+  // ✅ Clear cache on logout
   const logout = async () => {
     await invalidateCache(`family_${user.uid}`);
     await signOut(auth);
     navigate("/");
   };
 
-  // ✅ Shared cache patch helper — used by both edit and add handlers
-  const patchCache = async (updaterFn) => {
-    const CACHE_KEY = `family_${user.uid}`;
-    const cached = await loadCache(CACHE_KEY);
-    if (!cached) return;
-    const updatedFamily = updaterFn(cached.family);
-    await saveCache(CACHE_KEY, { family: updatedFamily, familyId: cached.familyId });
-    setFamily(updatedFamily);
-  };
-
+  // ── LOADING ──
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -129,6 +158,7 @@ export default function DashboardPage() {
         <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white opacity-5" />
         <div className="absolute -bottom-10 -left-4 w-40 h-40 rounded-full bg-white opacity-5" />
 
+        {/* Top bar — ✅ forceRefresh on button click */}
         <div className="flex justify-between items-center mb-5 relative">
           <button onClick={() => loadFamily(true)} className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
             <RefreshCw size={14} />
@@ -138,6 +168,7 @@ export default function DashboardPage() {
           </button>
         </div>
 
+        {/* Family identity */}
         <div className="flex items-center gap-4 relative">
           <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center text-3xl flex-shrink-0">
             👨‍👩‍👧
@@ -159,6 +190,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Stat strip */}
         <div className="grid grid-cols-3 gap-2 mt-5 relative">
           {[
             { icon: <Users size={16} />, label: "Members", count: members.length, color: "bg-white/20" },
@@ -201,9 +233,8 @@ export default function DashboardPage() {
               </button>
             ))}
 
-            {/* ✅ Opens add modal instead of navigating away */}
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => navigate("/registration")}
               className="flex flex-col items-center flex-shrink-0 gap-1"
             >
               <div className="w-14 h-14 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400">
@@ -219,7 +250,7 @@ export default function DashboardPage() {
       <div className="px-4 mt-4">
         <div className="bg-gray-200 rounded-xl p-1 flex">
           {[
-            { key: "all",      label: `All (${members.length})` },
+            { key: "all", label: `All (${members.length})` },
             { key: "students", label: `Students (${students.length})` },
             { key: "contacts", label: `Others (${contacts.length})` },
           ].map(tab => (
@@ -227,7 +258,9 @@ export default function DashboardPage() {
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                activeTab === tab.key ? "bg-white text-blue-600 shadow" : "text-gray-500"
+                activeTab === tab.key
+                  ? "bg-white text-blue-600 shadow"
+                  : "text-gray-500"
               }`}
             >
               {tab.label}
@@ -263,7 +296,12 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-1 text-gray-400 text-xs mt-0.5">
-                  {member.mobile && <><Phone size={10} /><span>{member.mobile}</span></>}
+                  {member.mobile && (
+                    <>
+                      <Phone size={10} />
+                      <span>{member.mobile}</span>
+                    </>
+                  )}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {member.isStudent
@@ -286,15 +324,14 @@ export default function DashboardPage() {
       <div className="px-4 mt-4">
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Quick Actions</h3>
         <div className="grid grid-cols-2 gap-2">
-          {/* ✅ Opens add modal instead of navigating away */}
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => navigate("/registration")}
             className="bg-white rounded-xl p-4 shadow-sm flex flex-col items-center gap-2 active:scale-95 transition-transform"
           >
             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
               <GraduationCap size={20} className="text-blue-600" />
             </div>
-            <span className="text-xs font-medium text-gray-700 text-center">Add Member</span>
+            <span className="text-xs font-medium text-gray-700 text-center">Add Student Info</span>
           </button>
 
           <button
@@ -338,44 +375,34 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── EDIT MODAL ── */}
+      {/* ── EDIT MODAL ── ✅ invalidate cache after edit */}
       <EditMemberModal
         open={!!editingMember}
-        mode="edit"
         member={editingMember}
         familyId={familyId}
-        onClose={async (updated, updatedMember) => {
-          setEditingMember(null);
-          if (updated && updatedMember) {
-            await patchCache(family => ({
-              ...family,
-              members: family.members.map(m =>
-                m.id === updatedMember.id ? { ...m, ...updatedMember } : m
-              ),
-            }));
-          }
-        }}
+      onClose={async (updated, updatedMember) => {
+  setEditingMember(null);
+  if (updated && updatedMember) {
+    // ✅ Patch cache locally — zero Firebase read
+    const CACHE_KEY = `family_${user.uid}`;
+    const cached = await loadCache(CACHE_KEY);
+    if (cached) {
+      const updatedMembers = cached.family.members.map(m =>
+        m.id === updatedMember.id ? { ...m, ...updatedMember } : m
+      );
+      const updatedFamily = { ...cached.family, members: updatedMembers };
+      await saveCache(CACHE_KEY, { family: updatedFamily, familyId: cached.familyId });
+      setFamily(updatedFamily); // ✅ UI updates instantly
+    }
+  }
+  // ✅ if cancelled (updated=false) — do nothing
+}}
+        
       />
 
-      {/* ── ADD MODAL ── */}
-      <EditMemberModal
-        open={showAddModal}
-        mode="add"
-        familyId={familyId}
-        onClose={async (saved, newMember) => {
-          setShowAddModal(false);
-          if (saved && newMember) {
-            await patchCache(family => ({
-              ...family,
-              members: [...family.members, newMember],
-            }));
-          }
-        }}
-      />
-
-      {/* ── FAB ── ✅ Opens add modal */}
+      {/* ── FAB ── */}
       <button
-        onClick={() => setShowAddModal(true)}
+        onClick={() => navigate("/registration")}
         className="fixed bottom-20 right-4 w-14 h-14 bg-blue-600 text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-95 transition-transform"
         title="Add member"
       >

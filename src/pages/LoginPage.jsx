@@ -7,9 +7,8 @@ import {
   createUserWithEmailAndPassword
 } from "firebase/auth";
 
-import { ref, get, set } from "firebase/database";
+import { ref, get, set, update } from "firebase/database";
 import { db } from "../firebase";
-
 import { useNavigate } from "react-router-dom";
 
 export default function AuthPage() {
@@ -20,53 +19,98 @@ export default function AuthPage() {
   const navigate = useNavigate();
   const auth = getAuth();
 
-  // 🧠 🔗 AUTO CONNECT FAMILY IF EMAIL EXISTS
+  // ─────────────────────────────────────────────
+  // ⭐ Ensure user record exists in RTDB
+  // ─────────────────────────────────────────────
+  const ensureUserRecord = async (user) => {
+    if (!user?.uid) return;
+
+    const userRef = ref(db, `users/${user.uid}`);
+    const snap = await get(userRef);
+
+    if (!snap.exists()) {
+      await set(userRef, {
+        email: user.email || null,
+        role: "guest",
+        familyId: null,
+        memberId: null,
+        status: "pendingRegistration",
+        createdAt: Date.now()
+      });
+
+      // email index
+      if (user.email) {
+        const emailKey = user.email
+          .trim()
+          .toLowerCase()
+          .replace(/\./g, ",")
+          .replace(/@/g, "_");
+
+        await set(ref(db, `usersByEmail/${emailKey}`), user.uid);
+      }
+    }
+  };
+
+  // ─────────────────────────────────────────────
+  // 🔗 AUTO CONNECT FAMILY IF EMAIL EXISTS
+  // ─────────────────────────────────────────────
   const connectFamily = async (user) => {
-  if (!user?.email) return false;
+    if (!user?.email) return false;
 
-  const emailKey = user.email
-    .trim()
-    .toLowerCase()
-    .replace(/\./g, ",")
-    .replace(/@/g, "_");
+    const emailKey = user.email
+      .trim()
+      .toLowerCase()
+      .replace(/\./g, ",")
+      .replace(/@/g, "_");
 
-  console.log("Searching:", `users/${emailKey}`);
+    // old emailKey record
+    const emailSnap = await get(ref(db, `users/${emailKey}`));
 
-  const indexSnap = await get(ref(db, `users/${emailKey}`));
+    if (!emailSnap.exists()) return false;
 
-  if (!indexSnap.exists()) {
-    console.log("❌ Email not found");
-    return false;
-  }
+    const oldData = emailSnap.val();
 
-  const { familyId } = indexSnap.val();
+    await set(ref(db, `users/${user.uid}`), {
+      email: user.email,
+      familyId: oldData.familyId || null,
+      memberId: oldData.memberId || null,
+      role: oldData.role || "guest"
+    });
 
-  await set(ref(db, `users/${user.uid}/familyId`), familyId);
+    await set(ref(db, `usersByEmail/${emailKey}`), user.uid);
 
-  return true;
-};
+    return true;
+  };
 
+  // ─────────────────────────────────────────────
   // 🔵 GOOGLE LOGIN
+  // ─────────────────────────────────────────────
   const loginWithGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
       const res = await signInWithPopup(auth, provider);
 
+      // 🔥 ALWAYS create user node
+      await ensureUserRecord(res.user);
+
       const mapped = await connectFamily(res.user);
 
-      // 🔁 Redirect logic
       if (mapped) navigate("/dashboard");
       else navigate("/registration");
 
-    } catch (e) {
+    } catch {
       alert("Google login failed");
     }
   };
 
+  // ─────────────────────────────────────────────
   // 🔵 EMAIL LOGIN
+  // ─────────────────────────────────────────────
   const login = async () => {
     try {
       const res = await signInWithEmailAndPassword(auth, email, password);
+
+      await ensureUserRecord(res.user);
 
       const mapped = await connectFamily(res.user);
 
@@ -78,36 +122,36 @@ export default function AuthPage() {
     }
   };
 
-  // 🟢 REGISTER
+  // ─────────────────────────────────────────────
+  // 🟢 REGISTER (Email)
+  // ─────────────────────────────────────────────
   const register = async () => {
     try {
       const res = await createUserWithEmailAndPassword(auth, email, password);
 
+      await ensureUserRecord(res.user);
+
       const mapped = await connectFamily(res.user);
 
-    if (mapped) {
-        console.log("✅ User found in database. Navigating to Dashboard.");
-        navigate("/dashboard");
-      } else {
-        console.log("ℹ️ User not found. Navigating to Registration.");
-        navigate("/registration");
-      }
+      if (mapped) navigate("/dashboard");
+      else navigate("/registration");
 
     } catch (e) {
-      console.error("❌ Authentication Error:", e.message);
       alert(e.message);
     }
   };
 
+  // ─────────────────────────────────────────────
+  // UI
+  // ─────────────────────────────────────────────
   return (
     <div className="max-w-md mx-auto p-6 space-y-5">
 
-      {/* 🟣 Title */}
       <h1 className="text-2xl font-bold text-center text-blue-900">
-        Community App 2
+        Community App
       </h1>
 
-      {/* 🔴 Google */}
+      {/* Google */}
       <button
         onClick={loginWithGoogle}
         className="w-full bg-red-500 text-white p-3 rounded-lg font-semibold"
@@ -117,7 +161,7 @@ export default function AuthPage() {
 
       <div className="text-center text-gray-400">OR</div>
 
-      {/* 🔵 Tabs */}
+      {/* Tabs */}
       <div className="flex border rounded-lg overflow-hidden">
         <button
           onClick={() => setTab("login")}
@@ -138,7 +182,7 @@ export default function AuthPage() {
         </button>
       </div>
 
-      {/* 📧 Email */}
+      {/* Email */}
       <input
         type="email"
         placeholder="Email"
@@ -147,7 +191,7 @@ export default function AuthPage() {
         className="w-full border p-3 rounded-lg"
       />
 
-      {/* 🔒 Password */}
+      {/* Password */}
       <input
         type="password"
         placeholder="Password"
@@ -156,7 +200,7 @@ export default function AuthPage() {
         className="w-full border p-3 rounded-lg"
       />
 
-      {/* 🔑 Forgot */}
+      {/* Forgot */}
       {tab === "login" && (
         <p
           onClick={() => navigate("/forgot-password")}
@@ -166,7 +210,7 @@ export default function AuthPage() {
         </p>
       )}
 
-      {/* 🔘 Submit */}
+      {/* Submit */}
       {tab === "login" ? (
         <button
           onClick={login}
@@ -182,7 +226,6 @@ export default function AuthPage() {
           Create Account
         </button>
       )}
-
     </div>
   );
 }
