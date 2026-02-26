@@ -1,261 +1,653 @@
-import { useState, useEffect } from "react";
-import { ref, update, push, set } from "firebase/database";
+import { useState, useEffect, useCallback } from "react";
+import { ref, update, push } from "firebase/database";
 import { db } from "../../firebase";
-import StudentEducationSection from "../StudentEducationSection";
-import StudentSkillsSection from "../StudentSkillsSection";
-import StudentFinancialSection from "../StudentFinancialSection";
 import { saveCache, loadCache } from "../../utils/cache";
+import {
+  User, GraduationCap, Star, IndianRupee,
+  ChevronRight, Check, X, Plus
+} from "lucide-react";
 
-/* ============================================================
-   MemberModal — handles both ADD and EDIT in one component
-   
-   Usage (Edit):
-     <MemberModal open={true} mode="edit" member={memberObj} familyId={famId} onClose={fn} />
-
-   Usage (Add):
-     <MemberModal open={true} mode="add" familyId={famId} onClose={fn} />
-
-   onClose signature:
-     onClose(saved: boolean, member?: MemberObject)
-============================================================ */
-
+// ─────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────
 const EMPTY_FORM = {
-  name:             "",
-  mobile:           "",
-  email:            "",
-  occupation:       "",
-  married:          false,
-  isStudent:        false,
-  gender:           "",
-  dob:              "",
-  stayAway:         false,
-  stayCity:         "",
-  educationType:    "",
-  standard:         "",
-  stream:           "",
-  medium:           "",
-  year:             "",
-  degree:           "",
-  specialization:   "",
-  collegeName:      "",
-  courseName:       "",
-  courseStage:      "",
-  exam:             "",
-  skills:           { indoorSports: [], outdoorSports: [], talents: [], creative: [], hobbies: [], funActivities: [] },
-  helpRequired:     "",
-  needsScholarship: null,
-  supportType:      {},
+  name: "", mobile: "", email: "", gender: "", dob: "",
+  married: false, stayAway: false, stayCity: "",
+  isStudent: false, occupation: "",
+  educationType: "", standard: "", stream: "", medium: "",
+  year: "", degree: "", specialization: "", collegeName: "",
+  courseName: "", courseStage: "", exam: "",
+  indoorSports: [], outdoorSports: [], talents: [],
+  creative: [], hobbies: [], funActivities: [],
+  achievements: "", aboutMe: "",
+  needsScholarship: false,   // ✅ FIX 2: false not null
+  supportFees: false, supportBooks: false,
+  supportCoaching: false, supportCounseling: false,
+  helpRequired: "",
 };
 
-const FIELD_LABELS = {
-  name:             "Name",
-  mobile:           "Mobile",
-  email:            "Email",
-  occupation:       "Occupation",
-  married:          "Married",
-  isStudent:        "Is Student",
-  gender:           "Gender",
-  dob:              "Date of Birth",
-  stayAway:         "Stays Away",
-  stayCity:         "Stay City",
-  educationType:    "Education Level",
-  standard:         "Class / Grade",
-  stream:           "Stream",
-  medium:           "Medium",
-  year:             "Year",
-  degree:           "Degree",
-  specialization:   "Specialization",
-  collegeName:      "College Name",
-  courseName:       "Course Name",
-  courseStage:      "Course Stage",
-  exam:             "Exam",
-  helpRequired:     "Help Required",
-  needsScholarship: "Needs Scholarship",
-  supportType:      "Support Needed",
-  education:        "Education Summary",
-};
+const TABS = [
+  { id: "basic",     label: "Basic",   icon: User },
+  { id: "education", label: "Study",   icon: GraduationCap },
+  { id: "skills",    label: "Skills",  icon: Star },
+  { id: "financial", label: "Support", icon: IndianRupee },
+];
 
-const SKIP_IN_REVIEW = new Set(["skills"]);
+const EDUCATION_TYPES = [
+  "School Student", "College Student", "Postgraduate",
+  "Diploma / ITI", "Professional Course", "Competitive Prep"
+];
+const SCHOOL_STANDARDS = [
+  "Nursery","Jr KG","Sr KG","1st","2nd","3rd","4th","5th",
+  "6th","7th","8th","9th","10th","11th","12th"
+];
+const COLLEGE_YEARS        = ["1st Year","2nd Year","3rd Year","Final Year"];
+const PG_YEARS             = ["PG Year 1","PG Final Year"];
+const DIPLOMA_YEARS        = ["Year 1","Year 2","Year 3"];
+const DEGREE_PROGRAMS      = ["BSc","BCom","BA","BBA","BE/BTech","MBBS","BDS","BPharma","Law","Other"];
+const PROFESSIONAL_COURSES = ["CA","CS","CMA","CFA","Other"];
+const PROFESSIONAL_STAGES  = ["Foundation","Inter","Final"];
+const NEEDS_STREAM         = ["11th","12th"]; // ✅ FIX 5
 
-// Reusable toggle switch
-function Toggle({ value, onChange, label }) {
+const SKILL_CATEGORIES = [
+  { key: "indoorSports",  label: "Indoor Sports",  emoji: "🏓", options: ["Chess","Carrom","TT","Badminton (Indoor)","Snooker"] },
+  { key: "outdoorSports", label: "Outdoor Sports", emoji: "🏏", options: ["Cricket","Badminton","Football","Kabaddi","Athletics"] },
+  { key: "talents",       label: "Talents",        emoji: "🎤", options: ["Singing","Dancing","Anchoring","Acting","Public Speaking"] },
+  { key: "creative",      label: "Creative",       emoji: "🎨", options: ["Reel Making","Content Writing","Photography","Drawing","Craft"] },
+  { key: "hobbies",       label: "Hobbies",        emoji: "📖", options: ["Trekking","Reading","Gardening","Cooking","Travel"] },
+  { key: "funActivities", label: "Fun",            emoji: "🎉", options: ["Antakshari","Quiz","One Minute Games","Dumb Charades"] },
+];
+
+// ✅ Normalize mobile — handles Indian and international numbers
+function normalizeMobile(mobile) {
+  if (!mobile) return "";
+  const cleaned = String(mobile).trim();
+  if (cleaned.startsWith("+")) {
+    // International format — remove spaces, dashes, brackets only
+    return cleaned.replace(/[\s\-\(\)]/g, "");
+  }
+  // No + prefix — assume India, strip to 10 digits
+  return cleaned.replace(/\D/g, "").slice(-10);
+}
+
+// ─────────────────────────────────────────────
+// REUSABLE UI PIECES
+// ─────────────────────────────────────────────
+function FieldLabel({ children }) {
+  return <p className="text-xs font-semibold mb-1.5" style={{ color: "#7B1C2E" }}>{children}</p>;
+}
+
+function TextInput({ label, value, onChange, placeholder, type = "text", inputMode, maxLength, error }) {
   return (
-    <label className="flex items-center gap-3 py-2 cursor-pointer">
-      <div
-        onClick={onChange}
-        className={`w-11 h-6 rounded-full transition-colors relative ${value ? "bg-blue-500" : "bg-gray-300"}`}
-      >
-        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${value ? "left-6" : "left-1"}`} />
-      </div>
-      <span className="text-sm font-medium text-gray-700">{label}</span>
-    </label>
+    <div>
+      {label && <FieldLabel>{label}</FieldLabel>}
+      <input
+        type={type} inputMode={inputMode} maxLength={maxLength}
+        value={value} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{
+          fontSize: 16,
+          border: error ? "2px solid #ef4444" : "2px solid #f0e6e6",
+          background: "#fff", color: "#3D0010",
+        }}
+        className="w-full rounded-xl px-4 py-3 outline-none focus:border-[#C9A84C] transition-colors"
+      />
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
   );
 }
 
-export default function EditMemberModal({
-  open,
-  mode = "edit",      // "edit" | "add"
-  member = null,      // required for edit, null for add
-  familyId,           // required for add (to link new member to family)
-  onClose,
-}) {
+function PillSelect({ label, value, onChange, options }) {
+  return (
+    <div>
+      {label && <FieldLabel>{label}</FieldLabel>}
+      <div className="flex flex-wrap gap-2">
+        {options.map(opt => {
+          const val = typeof opt === "object" ? opt.value : opt;
+          const lbl = typeof opt === "object" ? opt.label : opt;
+          const active = value === val;
+          return (
+            <button key={val} type="button" onClick={() => onChange(val)}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold border-2 transition-all"
+              style={active
+                ? { background: "#7B1C2E", color: "#F0D080", borderColor: "#7B1C2E" }
+                : { background: "#fff", color: "#7B1C2E", borderColor: "#f0e6e6" }
+              }
+            >{lbl}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BigToggle({ value, onChange, labelOn, labelOff }) {
+  return (
+    <button type="button" onClick={onChange}
+      className="flex items-center justify-between w-full px-4 py-3 rounded-xl border-2 transition-all"
+      style={{ borderColor: value ? "#C9A84C" : "#f0e6e6", background: value ? "#FDF0D0" : "#fff" }}
+    >
+      <span className="text-sm font-semibold" style={{ color: value ? "#7B5A00" : "#9B6060" }}>
+        {value ? labelOn : labelOff}
+      </span>
+      <div className="w-12 h-6 rounded-full relative transition-colors"
+        style={{ background: value ? "#C9A84C" : "#e5e7eb" }}>
+        <div className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all"
+          style={{ left: value ? "28px" : "4px" }} />
+      </div>
+    </button>
+  );
+}
+
+function NativeSelect({ label, value, onChange, options }) {
+  return (
+    <div>
+      {label && <FieldLabel>{label}</FieldLabel>}
+      <div className="relative">
+        <select value={value || ""} onChange={e => onChange(e.target.value)}
+          style={{
+            fontSize: 16, border: "2px solid #f0e6e6", background: "#fff",
+            color: value ? "#3D0010" : "#9B6060",
+            appearance: "none", WebkitAppearance: "none",
+          }}
+          className="w-full rounded-xl px-4 py-3 outline-none focus:border-[#C9A84C] transition-colors pr-10"
+        >
+          <option value="">— Select —</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <ChevronRight size={16} className="absolute right-3 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none"
+          style={{ color: "#9B6060" }} />
+      </div>
+    </div>
+  );
+}
+
+function SkillChip({ label, selected, onToggle }) {
+  return (
+    <button type="button" onClick={onToggle}
+      className="flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 text-xs font-medium transition-all"
+      style={selected
+        ? { borderColor: "#7B1C2E", background: "#FDE8EC", color: "#7B1C2E" }
+        : { borderColor: "#f0e6e6", background: "#fff", color: "#9B6060" }
+      }
+    >
+      {selected && <Check size={11} strokeWidth={3} />}
+      {label}
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────
+// TAB CONTENT
+// ─────────────────────────────────────────────
+function TabBasic({ form, update, errors }) {
+  return (
+    <div className="space-y-4 px-4 py-4">
+      <TextInput label="Full Name *" value={form.name} onChange={v => update("name", v)}
+        placeholder="e.g. Ramesh Patel" error={errors.name} />
+      <TextInput label="Mobile Number" value={form.mobile} onChange={v => update("mobile", v)}
+        placeholder="10-digit number" inputMode="numeric" maxLength={10} error={errors.mobile} />
+      <TextInput label="Email" value={form.email} onChange={v => update("email", v)}
+        placeholder="email@example.com" type="email" />
+      <PillSelect label="Gender" value={form.gender} onChange={v => update("gender", v)}
+        options={["Male","Female","Other"]} />
+      <TextInput label="Date of Birth" value={form.dob} onChange={v => update("dob", v)}
+        placeholder="DD/MM/YYYY" inputMode="numeric" />
+      <BigToggle value={form.married} onChange={() => update("married", !form.married)}
+        labelOn="Married ✓" labelOff="Unmarried" />
+      <BigToggle value={form.stayAway} onChange={() => update("stayAway", !form.stayAway)}
+        labelOn="Stays away from home" labelOff="Stays at home" />
+      {form.stayAway && (
+        <TextInput label="Which city?" value={form.stayCity} onChange={v => update("stayCity", v)}
+          placeholder="e.g. Ahmedabad, Surat" />
+      )}
+    </div>
+  );
+}
+
+function TabEducation({ form, update }) {
+  const isStudent     = form.isStudent;
+  const isSchool      = form.educationType === "School Student";
+  const isCollege     = form.educationType === "College Student";
+  const isPG          = form.educationType === "Postgraduate";
+  const isDiploma     = form.educationType === "Diploma / ITI";
+  const isProfessional= form.educationType === "Professional Course";
+  const isCompetitive = form.educationType === "Competitive Prep";
+  const needsStream   = isSchool && NEEDS_STREAM.includes(form.standard); // ✅ FIX 5
+
+  const handleEducationType = (v) => {
+    update("educationType", v);
+    ["standard","stream","medium","year","degree","specialization",
+     "collegeName","courseName","courseStage","exam"].forEach(f => update(f, ""));
+  };
+
+  // ✅ FIX 4: reset student fields when turning student OFF
+  const handleStudentToggle = () => {
+    const turningOff = isStudent;
+    update("isStudent", !isStudent);
+    if (turningOff) {
+      update("educationType", "");
+      update("standard", ""); update("stream", ""); update("medium", "");
+      update("year", ""); update("degree", ""); update("specialization", "");
+      update("collegeName", ""); update("courseName", "");
+      update("courseStage", ""); update("exam", "");
+      update("needsScholarship", false);
+      update("supportFees", false); update("supportBooks", false);
+      update("supportCoaching", false); update("supportCounseling", false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 px-4 py-4">
+      <BigToggle value={isStudent} onChange={handleStudentToggle}
+        labelOn="🎓 Is a Student" labelOff="Not a student" />
+
+      {!isStudent && (
+        <TextInput label="Occupation" value={form.occupation}
+          onChange={v => update("occupation", v)} placeholder="e.g. Engineer, Teacher, Business" />
+      )}
+
+      {isStudent && (
+        <>
+          <NativeSelect label="Education Level" value={form.educationType}
+            onChange={handleEducationType} options={EDUCATION_TYPES} />
+          {isSchool && (
+            <>
+              <NativeSelect label="Class / Grade" value={form.standard}
+                onChange={v => update("standard", v)} options={SCHOOL_STANDARDS} />
+              {needsStream && (
+                <PillSelect label="Stream" value={form.stream}
+                  onChange={v => update("stream", v)} options={["Science","Commerce","Arts"]} />
+              )}
+              <PillSelect label="Medium" value={form.medium}
+                onChange={v => update("medium", v)} options={["English","Gujarati","Hindi"]} />
+            </>
+          )}
+          {isCollege && (
+            <>
+              <NativeSelect label="Year of Study" value={form.year} onChange={v => update("year", v)} options={COLLEGE_YEARS} />
+              <NativeSelect label="Degree Program" value={form.degree} onChange={v => update("degree", v)} options={DEGREE_PROGRAMS} />
+              <TextInput label="Branch / Major" value={form.specialization} onChange={v => update("specialization", v)} placeholder="e.g. Computer Science" />
+              <TextInput label="College Name" value={form.collegeName} onChange={v => update("collegeName", v)} placeholder="College name" />
+            </>
+          )}
+          {isPG && (
+            <>
+              <NativeSelect label="Year" value={form.year} onChange={v => update("year", v)} options={PG_YEARS} />
+              <TextInput label="Major / Specialization" value={form.specialization} onChange={v => update("specialization", v)} placeholder="e.g. MBA Finance" />
+            </>
+          )}
+          {isDiploma && (
+            <>
+              <NativeSelect label="Year" value={form.year} onChange={v => update("year", v)} options={DIPLOMA_YEARS} />
+              <TextInput label="Branch / Trade" value={form.specialization} onChange={v => update("specialization", v)} placeholder="e.g. Electrical" />
+            </>
+          )}
+          {isProfessional && (
+            <>
+              <NativeSelect label="Course" value={form.courseName} onChange={v => update("courseName", v)} options={PROFESSIONAL_COURSES} />
+              <PillSelect label="Stage" value={form.courseStage} onChange={v => update("courseStage", v)} options={PROFESSIONAL_STAGES} />
+            </>
+          )}
+          {isCompetitive && (
+            <TextInput label="Exam Name" value={form.exam} onChange={v => update("exam", v)} placeholder="e.g. UPSC, JEE, NEET" />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TabSkills({ form, update }) {
+  const [customInputs, setCustomInputs] = useState({});
+
+  const toggleSkill = (categoryKey, skill) => {
+    const current = form[categoryKey] || [];
+    const updated = current.includes(skill)
+      ? current.filter(s => s !== skill)
+      : [...current, skill];
+    update(categoryKey, updated);
+  };
+
+  const addCustom = (categoryKey) => {
+    const val = (customInputs[categoryKey] || "").trim();
+    if (!val) return;
+    toggleSkill(categoryKey, val);
+    setCustomInputs(prev => ({ ...prev, [categoryKey]: "" }));
+  };
+
+  return (
+    <div className="space-y-5 px-4 py-4">
+      {SKILL_CATEGORIES.map(cat => {
+        const selected = form[cat.key] || [];
+        const customSkills = selected.filter(s => !cat.options.includes(s));
+        return (
+          <div key={cat.key}>
+            <FieldLabel>{cat.emoji} {cat.label}</FieldLabel>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {cat.options.map(skill => (
+                <SkillChip key={skill} label={skill}
+                  selected={selected.includes(skill)}
+                  onToggle={() => toggleSkill(cat.key, skill)} />
+              ))}
+              {customSkills.map(skill => (
+                <SkillChip key={skill} label={skill} selected
+                  onToggle={() => toggleSkill(cat.key, skill)} />
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={customInputs[cat.key] || ""}
+                onChange={e => setCustomInputs(prev => ({ ...prev, [cat.key]: e.target.value }))}
+                onKeyDown={e => e.key === "Enter" && addCustom(cat.key)}
+                placeholder="Add other..."
+                style={{ fontSize: 16, border: "2px solid #f0e6e6" }}
+                className="flex-1 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#C9A84C]"
+              />
+              <button type="button" onClick={() => addCustom(cat.key)}
+                disabled={!(customInputs[cat.key] || "").trim()}
+                className="w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-30"
+                style={{ background: "#7B1C2E" }}
+              >
+                <Plus size={16} color="#F0D080" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      <div>
+        <FieldLabel>🏆 Achievements</FieldLabel>
+        <textarea value={form.achievements} onChange={e => update("achievements", e.target.value)}
+          placeholder="Awards, competitions, certificates..." rows={3}
+          style={{ fontSize: 16, border: "2px solid #f0e6e6" }}
+          className="w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-[#C9A84C] resize-none" />
+      </div>
+      <div>
+        <FieldLabel>👤 About</FieldLabel>
+        <textarea value={form.aboutMe} onChange={e => update("aboutMe", e.target.value)}
+          placeholder="Personality, goals, interests..." rows={3}
+          style={{ fontSize: 16, border: "2px solid #f0e6e6" }}
+          className="w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-[#C9A84C] resize-none" />
+      </div>
+    </div>
+  );
+}
+
+function TabFinancial({ form, update }) {
+  const ns = form.needsScholarship;
+  const SUPPORT = [
+    { key: "supportFees",       label: "Fees",       icon: "💳" },
+    { key: "supportBooks",      label: "Books",      icon: "📚" },
+    { key: "supportCoaching",   label: "Coaching",   icon: "🎯" },
+    { key: "supportCounseling", label: "Counseling", icon: "🧠" },
+  ];
+
+  return (
+    <div className="space-y-4 px-4 py-4">
+      <div className="rounded-2xl p-4"
+        style={{ background: "linear-gradient(135deg, #FDF0D0, #FDE8EC)" }}>
+        <p className="text-sm font-bold mb-1" style={{ color: "#5A1020" }}>📋 Educational Support</p>
+        <p className="text-xs" style={{ color: "#9B6060" }}>Does this student need financial or academic help?</p>
+      </div>
+
+      <div>
+        <FieldLabel>Need support?</FieldLabel>
+        <div className="flex gap-3">
+          {[
+            { value: true,  label: "Yes, need help", icon: "🙋" },
+            { value: false, label: "No, all good",   icon: "✅" },
+          ].map(opt => (
+            <button key={String(opt.value)} type="button"
+              onClick={() => update("needsScholarship", opt.value)}
+              className="flex-1 py-3 rounded-xl border-2 text-xs font-semibold transition-all"
+              style={ns === opt.value
+                ? { borderColor: "#C9A84C", background: "#FDF0D0", color: "#7B5A00" }
+                : { borderColor: "#f0e6e6", background: "#fff", color: "#9B6060" }
+              }
+            >
+              <div className="text-xl mb-0.5">{opt.icon}</div>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {ns === true && (
+        <div>
+          <FieldLabel>What kind of support?</FieldLabel>
+          <div className="grid grid-cols-2 gap-2">
+            {SUPPORT.map(({ key, label, icon }) => {
+              const checked = !!form[key];
+              return (
+                <button key={key} type="button" onClick={() => update(key, !checked)}
+                  className="flex items-center gap-2 p-3 rounded-xl border-2 text-left transition-all"
+                  style={checked
+                    ? { borderColor: "#C9A84C", background: "#FDF0D0", color: "#7B5A00" }
+                    : { borderColor: "#f0e6e6", background: "#fff", color: "#9B6060" }
+                  }
+                >
+                  <span className="text-lg">{icon}</span>
+                  <span className="text-xs font-semibold">{label}</span>
+                  {checked && <Check size={12} className="ml-auto" style={{ color: "#C9A84C" }} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <FieldLabel>Additional Notes</FieldLabel>
+        <textarea value={form.helpRequired} onChange={e => update("helpRequired", e.target.value)}
+          placeholder="Any specific help or notes..." rows={3}
+          style={{ fontSize: 16, border: "2px solid #f0e6e6" }}
+          className="w-full rounded-xl px-4 py-3 text-sm outline-none focus:border-[#C9A84C] resize-none" />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// REVIEW SCREEN
+// ─────────────────────────────────────────────
+function ReviewScreen({ form, onEdit, onSave, saving, isAdding }) {
+  const rows = [
+    { label: "Name",       value: form.name },
+    { label: "Mobile",     value: form.mobile },
+    { label: "Email",      value: form.email },
+    { label: "Gender",     value: form.gender },
+    { label: "DOB",        value: form.dob },
+    { label: "Status",     value: form.married ? "Married" : "Unmarried" },
+    { label: "Stays",      value: form.stayAway ? `Away – ${form.stayCity || "?"}` : "At home" },
+    { label: "Student",    value: form.isStudent ? "Yes" : "No" },
+    { label: "Occupation", value: form.occupation },
+    { label: "Education",  value: form.educationType },
+    { label: "Grade/Year", value: form.standard || form.year },
+    { label: "Degree",     value: form.degree },
+    { label: "College",    value: form.collegeName },
+    { label: "Support",    value: form.needsScholarship ? "Needs help" : "No support needed" },
+  ].filter(r => r.value);
+
+  const allSkills = SKILL_CATEGORIES
+    .flatMap(cat => (form[cat.key] || []).map(s => `${cat.emoji} ${s}`));
+
+  return (
+    // ✅ FIX 3: flex-1 on scroll area so buttons stay visible
+    <div className="flex flex-col" style={{ minHeight: 0 }}>
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+        <div className="flex items-center gap-3 mb-4 p-3 rounded-2xl" style={{ background: "#FDE8EC" }}>
+          <div className="w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold flex-shrink-0"
+            style={{ background: "#7B1C2E", color: "#F0D080" }}>
+            {(form.name || "?")[0].toUpperCase()}
+          </div>
+          <div>
+            <p className="font-bold text-base" style={{ color: "#5A1020" }}>{form.name || "—"}</p>
+            <p className="text-xs" style={{ color: "#9B6060" }}>{form.educationType || form.occupation || "Member"}</p>
+          </div>
+        </div>
+
+        {rows.map(r => (
+          <div key={r.label} className="flex justify-between items-start py-2 border-b"
+            style={{ borderColor: "#f0e6e6" }}>
+            <span className="text-xs" style={{ color: "#9B6060" }}>{r.label}</span>
+            <span className="text-xs font-semibold text-right max-w-[60%]"
+              style={{ color: "#3D0010" }}>{r.value}</span>
+          </div>
+        ))}
+
+        {allSkills.length > 0 && (
+          <div className="py-2">
+            <p className="text-xs mb-2" style={{ color: "#9B6060" }}>Skills</p>
+            <div className="flex flex-wrap gap-1.5">
+              {allSkills.map(s => (
+                <span key={s} className="text-xs px-2 py-1 rounded-full"
+                  style={{ background: "#FDE8EC", color: "#7B1C2E" }}>{s}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-3 px-4 pt-3 border-t"
+        style={{
+          borderColor: "#f0e6e6",
+          paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+        }}>
+        <button onClick={onEdit}
+          className="flex-1 py-3.5 rounded-xl text-sm font-semibold border-2"
+          style={{ borderColor: "#f0e6e6", color: "#7B1C2E" }}>
+          ← Edit
+        </button>
+        <button onClick={onSave} disabled={saving}
+          className="flex-1 py-3.5 rounded-xl text-sm font-bold text-white disabled:opacity-60"
+          style={{ background: "#7B1C2E" }}>
+          {saving ? "Saving..." : isAdding ? "Add Member ✓" : "Save ✓"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MAIN MODAL
+// ─────────────────────────────────────────────
+export default function EditMemberModal({ open, mode = "edit", member = null, familyId, onClose }) {
   const isAdding = mode === "add";
+  const draftKey = isAdding ? `memberDraft_new_${familyId}` : `memberDraft_${member?.id}`;
 
-  const [form, setForm] = useState(null);
-  const [showSkills, setShowSkills] = useState(false);
-  const [skillCardIdx, setSkillCardIdx] = useState(0);
+  const [form, setForm]             = useState(null);
+  const [activeTab, setActiveTab]   = useState("basic");
   const [showReview, setShowReview] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState({});
-
-  // Draft key differs for add vs edit
-  const draftKey = isAdding
-    ? `memberDraft_new_${familyId}`
-    : `memberDraft_${member?.id}`;
-
-  /* ================= LOAD FORM ================= */
+  const [saving, setSaving]         = useState(false);
+  const [errors, setErrors]         = useState({});
 
   useEffect(() => {
     if (!open) return;
-
     const load = async () => {
       const draft = await loadCache(draftKey);
-      const hasDraft = draft && typeof draft === "object" && Object.keys(draft).length > 0;
-
-      if (hasDraft) {
-        setForm(draft);
-        return;
-      }
-
+      if (draft && Object.keys(draft).length > 0) { setForm(draft); return; }
       if (isAdding) {
-        // Add mode — start with empty form
         setForm({ ...EMPTY_FORM });
       } else {
-        // Edit mode — populate from existing member
         if (!member) return;
         setForm({
-          name:             member.name             || "",
-          mobile:           member.mobile           || member.phone || "",
-          email:            member.email            || "",
-          occupation:       member.occupation       || "",
-          married:          member.married          || false,
-          isStudent:        member.isStudent        || false,
-          gender:           member.gender           || "",
-          dob:              member.dob              || "",
-          stayAway:         member.stayAway         || false,
-          stayCity:         member.stayCity         || "",
-          educationType:    member.educationType    || "",
-          standard:         member.standard         || "",
-          stream:           member.stream           || "",
-          medium:           member.medium           || "",
-          year:             member.year             || "",
-          degree:           member.degree           || "",
-          specialization:   member.specialization   || "",
-          collegeName:      member.collegeName      || "",
-          courseName:       member.courseName       || "",
-          courseStage:      member.courseStage      || "",
-          exam:             member.exam             || "",
-          skills:           member.skills           || { ...EMPTY_FORM.skills },
-          helpRequired:     member.helpRequired     || "",
-          needsScholarship: member.needsScholarship ?? null,
-          supportType:      member.supportType      || {},
+          ...EMPTY_FORM,
+          name: member.name || "", mobile: member.mobile || member.phone || "",
+          email: member.email || "", gender: member.gender || "",
+          dob: member.dob || "", married: member.married || false,
+          stayAway: member.stayAway || false, stayCity: member.stayCity || "",
+          isStudent: member.isStudent || false, occupation: member.occupation || "",
+          educationType: member.educationType || "", standard: member.standard || "",
+          stream: member.stream || "", medium: member.medium || "",
+          year: member.year || "", degree: member.degree || "",
+          specialization: member.specialization || "", collegeName: member.collegeName || "",
+          courseName: member.courseName || "", courseStage: member.courseStage || "",
+          exam: member.exam || "",
+          indoorSports: member.indoorSports || [], outdoorSports: member.outdoorSports || [],
+          talents: member.talents || [], creative: member.creative || [],
+          hobbies: member.hobbies || [], funActivities: member.funActivities || [],
+          achievements: member.achievements || "", aboutMe: member.aboutMe || "",
+          needsScholarship: member.needsScholarship ?? false, // ✅ FIX 2
+          supportFees: member.supportFees || false, supportBooks: member.supportBooks || false,
+          supportCoaching: member.supportCoaching || false, supportCounseling: member.supportCounseling || false,
+          helpRequired: member.helpRequired || "",
         });
       }
     };
-
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isAdding, member?.id]);
 
-  /* ================= RESET ON CLOSE ================= */
-
   useEffect(() => {
-    if (!open) {
-      setForm(null);
-      setShowSkills(false);
-      setShowReview(false);
-      setErrors({});
-      setSkillCardIdx(0);
-    }
+    if (!open) { setForm(null); setActiveTab("basic"); setShowReview(false); setErrors({}); }
   }, [open]);
-
-  /* ================= AUTO SAVE DRAFT (debounced 600ms) ================= */
 
   useEffect(() => {
     if (!form || !open) return;
-    const timer = setTimeout(() => {
-      saveCache(draftKey, form);
-    }, 600);
-    return () => clearTimeout(timer);
+    const t = setTimeout(() => saveCache(draftKey, form), 600);
+    return () => clearTimeout(t);
   }, [form, draftKey, open]);
 
-  /* ================= HELPERS ================= */
-
-  const updateField = (field, value) =>
-    setForm(prev => ({ ...prev, [field]: value }));
-
-  const getEducationSummary = () => {
-    if (!form?.isStudent) return "";
-    if (form.educationType === "School Student")      return form.standard;
-    if (form.educationType === "College Student")     return `${form.degree || ""} ${form.year || ""}`.trim();
-    if (form.educationType === "Postgraduate")        return `PG ${form.year || ""}`.trim();
-    if (form.educationType === "Diploma / ITI")       return `Diploma ${form.year || ""}`.trim();
-    if (form.educationType === "Professional Course") return `${form.courseName || ""} ${form.courseStage || ""}`.trim();
-    if (form.educationType === "Competitive Prep")    return form.exam;
-    return "";
-  };
-
-  /* ================= VALIDATION ================= */
+  const updateField = useCallback((field, value) =>
+    setForm(prev => ({ ...prev, [field]: value })), []);
 
   const validate = () => {
     const errs = {};
-    if (!form.name?.trim()) errs.name = "Name is required";
-    if (form.mobile && !/^\d{10}$/.test(form.mobile.trim())) {
-      errs.mobile = "Enter a valid 10-digit mobile number";
+    if (!form?.name?.trim()) errs.name = "Name is required";
+    if (form?.mobile) {
+      const m = form.mobile.trim();
+      const validIndia = /^\d{10}$/.test(m);
+      const validIntl  = /^\+\d{7,15}$/.test(m.replace(/[\s\-\(\)]/g, ""));
+      if (!validIndia && !validIntl) {
+        errs.mobile = "Enter 10-digit number or international format (+44...)";
+      }
     }
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    if (Object.keys(errs).length > 0) { setActiveTab("basic"); return false; }
+    return true;
   };
 
-  const handleGoToReview = () => {
-    if (validate()) setShowReview(true);
-  };
-
-  /* ================= SAVE ================= */
+  const handleGoToReview = () => { if (validate()) setShowReview(true); };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const education = getEducationSummary();
+      let education = "";
+      if (form.isStudent) {
+        if (form.educationType === "School Student")      education = form.standard;
+        else if (form.educationType === "College Student") education = `${form.degree || ""} ${form.year || ""}`.trim();
+        else if (form.educationType === "Postgraduate")    education = `PG ${form.year || ""}`.trim();
+        else if (form.educationType === "Diploma / ITI")  education = `Diploma ${form.year || ""}`.trim();
+        else if (form.educationType === "Professional Course") education = `${form.courseName || ""} ${form.courseStage || ""}`.trim();
+        else if (form.educationType === "Competitive Prep")    education = form.exam;
+      }
+
       const payload = { ...form, education };
 
       if (isAdding) {
-        // ── ADD: push new member, then link to family ──
         const newMemberRef = push(ref(db, "members"));
-        await set(newMemberRef, {
-          ...payload,
-          familyId,
-          createdAt: Date.now(),
-        });
-        // Link member ID into family node
-        await update(ref(db, `families/${familyId}/members`), {
-          [newMemberRef.key]: true,
-        });
-
+        const memberId = newMemberRef.key;
+        const ts = Date.now();
+        const writes = {};
+        writes[`members/${memberId}`] = { ...payload, familyId, createdAt: ts };
+        writes[`families/${familyId}/members/${memberId}`] = true;
+        if (payload.mobile?.trim()) {
+          const mobile = normalizeMobile(payload.mobile); // ✅ FIX 1
+          if (mobile) {
+            writes[`mobileIndex/${mobile}/memberIds/${memberId}`] = true;
+            writes[`mobileIndex/${mobile}/familyIds/${familyId}`] = true;
+            writes[`mobileIndex/${mobile}/sources/manualAdd`] = true;
+            writes[`mobileIndex/${mobile}/createdAt`] = ts;
+          }
+        }
+        await update(ref(db), writes);
         await saveCache(draftKey, {});
-        onClose(true, { id: newMemberRef.key, familyId, ...payload });
-
+        onClose(true, { id: memberId, familyId, ...payload });
       } else {
-        // ── EDIT: update existing member ──
-        await update(ref(db, `members/${member.id}`), {
-          ...payload,
-          updatedAt: Date.now(),
-        });
-
+        await update(ref(db, `members/${member.id}`), { ...payload, updatedAt: Date.now() });
         await saveCache(draftKey, {});
         onClose(true, { ...member, ...payload });
       }
-
     } catch (e) {
       console.error("Save failed:", e);
     } finally {
@@ -263,222 +655,97 @@ export default function EditMemberModal({
     }
   };
 
-  /* ================= GUARDS ================= */
-
   if (!open || !form) return null;
 
-  /* ================= SKILLS MODE ================= */
-
-  if (showSkills) {
-    return (
-      <StudentSkillsSection
-        student={form}
-        update={updateField}
-        cardIndex={skillCardIdx}
-        setCardIndex={setSkillCardIdx}
-        exitSkillsMode={() => setShowSkills(false)}
-      />
-    );
-  }
-
-  /* ================= REVIEW MODE ================= */
-
-  if (showReview) {
-    const reviewData = { ...form, education: getEducationSummary() };
-
-    return (
-      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-        <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-
-          <div className="sticky top-0 bg-white border-b px-5 py-4 rounded-t-2xl">
-            <h2 className="text-lg font-bold text-gray-800">Review Details</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Please confirm before saving</p>
-          </div>
-
-          <div className="px-5 py-4">
-            <div className="text-center mb-4">
-              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-xl font-bold text-blue-600 mx-auto mb-1">
-                {(form.name || "?")[0].toUpperCase()}
-              </div>
-              <p className="font-semibold text-gray-800">{form.name || "—"}</p>
-            </div>
-
-            <div className="space-y-1">
-              {Object.entries(reviewData)
-                .filter(([key]) => !SKIP_IN_REVIEW.has(key))
-                .map(([key, value]) => {
-                  if (value === "" || value === null || value === undefined) return null;
-                  if (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0) return null;
-
-                  const label = FIELD_LABELS[key] || key;
-                  let display = "";
-                  if (Array.isArray(value))       display = value.join(", ");
-                  else if (typeof value === "boolean") display = value ? "Yes" : "No";
-                  else if (typeof value === "object") {
-                    display = Object.entries(value)
-                      .filter(([, v]) => v)
-                      .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1))
-                      .join(", ") || "None";
-                  }
-                  else display = String(value);
-
-                  return (
-                    <div key={key} className="flex justify-between py-2 border-b border-gray-50">
-                      <span className="text-xs text-gray-500">{label}</span>
-                      <span className="text-xs font-medium text-gray-800 text-right max-w-[55%]">{display}</span>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-
-          <div className="sticky bottom-0 bg-white border-t px-5 py-4 flex gap-2 rounded-b-2xl">
-            <button
-              onClick={() => setShowReview(false)}
-              className="flex-1 border border-gray-200 py-2.5 rounded-xl text-sm font-medium text-gray-600"
-            >
-              ← Edit
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex-1 bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60"
-            >
-              {saving ? "Saving..." : isAdding ? "Add Member ✓" : "Confirm & Save"}
-            </button>
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  /* ================= MAIN FORM UI ================= */
+  const tabContent = {
+    basic:     <TabBasic     form={form} update={updateField} errors={errors} />,
+    education: <TabEducation form={form} update={updateField} />,
+    skills:    <TabSkills    form={form} update={updateField} />,
+    financial: <TabFinancial form={form} update={updateField} />,
+  };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+    <>
+      <div className="fixed inset-0 z-40" style={{ background: "rgba(0,0,0,0.5)" }}
+        onClick={() => onClose(false)} />
+
+      <div className="fixed left-0 right-0 bottom-0 z-50 flex flex-col rounded-t-3xl overflow-hidden"
+        style={{
+          background: "#FDF6EC",
+          maxHeight: "85vh",
+          boxShadow: "0 -8px 40px rgba(90,16,32,0.25)",
+        }}
+      >
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+          <div className="w-10 h-1 rounded-full" style={{ background: "#C9A84C" }} />
+        </div>
 
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b px-5 py-4 rounded-t-2xl flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-gray-800">
-              {isAdding ? "Add Member" : "Edit Member"}
-            </h2>
-            {isAdding && (
-              <p className="text-xs text-gray-400 mt-0.5">Fill in the new member's details</p>
-            )}
-          </div>
-          <button
-            onClick={() => onClose(false)}
-            className="text-gray-400 hover:text-gray-600 text-xl font-bold"
-          >
-            ✕
+        <div className="flex items-center justify-between px-4 pb-3 flex-shrink-0">
+          <h2 className="text-base font-bold" style={{ color: "#5A1020" }}>
+            {showReview ? "Review Details" : isAdding ? "Add Member" : "Edit Member"}
+          </h2>
+          <button onClick={() => onClose(false)}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ background: "#FDE8EC" }}>
+            <X size={16} style={{ color: "#7B1C2E" }} />
           </button>
         </div>
 
-        <div className="px-5 py-4 space-y-3">
-
-          {/* Name */}
-          <div>
-            <label className="text-xs font-medium text-gray-600">Name *</label>
-            <input
-              className={`w-full border rounded-xl px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${errors.name ? "border-red-400" : "border-gray-200"}`}
-              placeholder="Full name"
-              value={form.name}
-              onChange={e => updateField("name", e.target.value)}
-            />
-            {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
+        {/* Tab bar */}
+        {!showReview && (
+          <div className="flex border-b flex-shrink-0 px-2" style={{ borderColor: "#f0e6e6" }}>
+            {TABS.map(tab => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className="flex-1 flex flex-col items-center gap-0.5 py-2 text-xs font-semibold transition-all relative"
+                  style={{ color: active ? "#7B1C2E" : "#C0A0A0" }}
+                >
+                  <Icon size={16} />
+                  {tab.label}
+                  {active && (
+                    <div className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full"
+                      style={{ background: "#C9A84C" }} />
+                  )}
+                </button>
+              );
+            })}
           </div>
+        )}
 
-          {/* Mobile */}
-          <div>
-            <label className="text-xs font-medium text-gray-600">Mobile</label>
-            <input
-              className={`w-full border rounded-xl px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${errors.mobile ? "border-red-400" : "border-gray-200"}`}
-              placeholder="10-digit mobile number"
-              value={form.mobile}
-              inputMode="numeric"
-              maxLength={10}
-              onChange={e => updateField("mobile", e.target.value)}
-            />
-            {errors.mobile && <p className="text-xs text-red-500 mt-1">{errors.mobile}</p>}
-          </div>
-
-          {/* Email */}
-          <div>
-            <label className="text-xs font-medium text-gray-600">Email</label>
-            <input
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-              placeholder="Email address"
-              value={form.email}
-              onChange={e => updateField("email", e.target.value)}
-            />
-          </div>
-
-          {/* Is Student */}
-          <Toggle
-            value={form.isStudent}
-            onChange={() => updateField("isStudent", !form.isStudent)}
-            label="Is a Student"
-          />
-
-          {/* STUDENT FIELDS */}
-          {form.isStudent && (
-            <>
-              <StudentEducationSection student={form} update={updateField} />
-
-              <button
-                onClick={() => { setSkillCardIdx(0); setShowSkills(true); }}
-                className="w-full border-2 border-indigo-200 text-indigo-600 py-2.5 rounded-xl text-sm font-medium"
-              >
-                🎯 Skills & Talents
-              </button>
-
-              <StudentFinancialSection student={form} update={updateField} />
-            </>
-          )}
-
-          {/* NON-STUDENT FIELDS */}
-          {!form.isStudent && (
-            <>
-              <div>
-                <label className="text-xs font-medium text-gray-600">Occupation</label>
-                <input
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  placeholder="e.g. Engineer, Teacher, Business"
-                  value={form.occupation}
-                  onChange={e => updateField("occupation", e.target.value)}
-                />
-              </div>
-
-              <Toggle
-                value={form.married}
-                onChange={() => updateField("married", !form.married)}
-                label="Married"
-              />
-            </>
-          )}
-
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto min-h-0" style={{ WebkitOverflowScrolling: "touch" }}>
+          {showReview
+            ? <ReviewScreen form={form} onEdit={() => setShowReview(false)}
+                onSave={handleSave} saving={saving} isAdding={isAdding} />
+            : (
+              <>
+                {tabContent[activeTab]}
+                <div className="flex gap-3 px-4 pt-2 mt-2 border-t"
+                  style={{
+                    borderColor: "#f0e6e6",
+                    paddingBottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+                  }}
+                >
+                  <button onClick={() => onClose(false)}
+                    className="flex-1 py-3.5 rounded-xl text-sm font-semibold border-2"
+                    style={{ borderColor: "#f0e6e6", color: "#7B1C2E" }}>
+                    Cancel
+                  </button>
+                  <button onClick={handleGoToReview}
+                    className="flex-1 py-3.5 rounded-xl text-sm font-bold text-white"
+                    style={{ background: "#7B1C2E" }}>
+                    Review →
+                  </button>
+                </div>
+              </>
+            )
+          }
         </div>
-
-        {/* Footer */}
-        <div className="sticky bottom-0 bg-white border-t px-5 py-4 flex gap-2 rounded-b-2xl">
-          <button
-            onClick={() => onClose(false)}
-            className="flex-1 border border-gray-200 py-2.5 rounded-xl text-sm font-medium text-gray-600"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleGoToReview}
-            className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-semibold"
-          >
-            {isAdding ? "Review & Add →" : "Review & Save →"}
-          </button>
-        </div>
-
       </div>
-    </div>
+    </>
   );
 }

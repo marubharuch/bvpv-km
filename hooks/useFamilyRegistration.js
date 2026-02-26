@@ -1,85 +1,68 @@
-import { useState, useEffect, useCallback } from "react";
+// src/hooks/useFamilyRegistration.js
 
-const STORAGE_KEY = "family_reg_draft";
+import { useState } from "react";
 
 export const STEPS = {
-  CITY:     "city",
-  CONTACTS: "contacts",
-  REORDER:  "reorder",
-  SUCCESS:  "success",
+  CITY: "CITY",
+  CONTACTS: "CONTACTS",
+  REORDER: "REORDER",
+  SUCCESS: "SUCCESS",
 };
 
-const initial = { step: STEPS.CITY, city: "", contacts: [] };
-
-function load() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; }
-  catch { return null; }
-}
-function save(s) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {}
-}
-function clear() {
-  try { localStorage.removeItem(STORAGE_KEY); } catch {}
-}
-function uid() {
-  return `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-}
-
 export function useFamilyRegistration() {
-  const [state, setState] = useState(() => load() || initial);
+  const [step, setStep] = useState(STEPS.CITY);
+  const [city, setCity] = useState("");
+  const [contacts, setContacts] = useState([]);
 
-  useEffect(() => {
-    if (state.step !== STEPS.SUCCESS) save(state);
-  }, [state]);
+  const addContact = (contact) => {
+    setContacts((prev) => [...prev, contact]);
+  };
 
-  const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
+  const addContacts = (newContacts) => {
+    setContacts((prev) => [...prev, ...newContacts]);
+  };
 
-  const setCity = useCallback((city) => set({ city, step: STEPS.CONTACTS }), [set]);
+  const updateContact = (index, updated) => {
+    setContacts((prev) =>
+      prev.map((c, i) => (i === index ? { ...c, ...updated } : c))
+    );
+  };
 
-  const addContact = useCallback((name, phone) =>
-    setState((s) => ({
-      ...s,
-      contacts: [...s.contacts, { id: uid(), name: name.trim(), phone: phone.trim() }],
-    })), []);
+  const removeContact = (index) => {
+    setContacts((prev) => prev.filter((_, i) => i !== index));
+  };
 
-  const addContacts = useCallback((list) =>
-    setState((s) => {
-      const existing = new Set(s.contacts.map((c) => c.phone));
-      const fresh = list
-        .filter((c) => c.name || c.phone)
-        .filter((c) => !existing.has(c.phone))
-        .map((c) => ({ id: uid(), name: c.name.trim(), phone: c.phone.trim() }));
-      return { ...s, contacts: [...s.contacts, ...fresh] };
-    }), []);
+  const reorder = (reordered) => {
+    setContacts(reordered);
+  };
 
-  const updateContact = useCallback((id, field, value) =>
-    setState((s) => ({
-      ...s,
-      contacts: s.contacts.map((c) => c.id === id ? { ...c, [field]: value } : c),
-    })), []);
+  const goToReorder = () => setStep(STEPS.REORDER);
 
-  const removeContact = useCallback((id) =>
-    setState((s) => ({ ...s, contacts: s.contacts.filter((c) => c.id !== id) })), []);
+  const goBack = () => {
+    if (step === STEPS.REORDER) setStep(STEPS.CONTACTS);
+    else if (step === STEPS.CONTACTS) setStep(STEPS.CITY);
+  };
 
-  const goToReorder = useCallback(() => set({ step: STEPS.REORDER }), [set]);
-  const goBack = useCallback(() =>
-    setState((s) => ({
-      ...s,
-      step: s.step === STEPS.CONTACTS ? STEPS.CITY : STEPS.CONTACTS,
-    })), []);
+  const onSuccess = () => setStep(STEPS.SUCCESS);
 
-  const reorder = useCallback((contacts) => set({ contacts }), [set]);
-
-  const onSuccess = useCallback(() => {
-    clear();
-    set({ step: STEPS.SUCCESS });
-  }, [set]);
-
-  const reset = useCallback(() => { clear(); setState(initial); }, []);
+  // Called when CityPicker selects a city — auto-advance to CONTACTS step
+  const handleSetCity = (selectedCity) => {
+    setCity(selectedCity);
+    setStep(STEPS.CONTACTS);
+  };
 
   return {
-    step: state.step, city: state.city, contacts: state.contacts,
-    setCity, addContact, addContacts, updateContact, removeContact,
-    goToReorder, goBack, reorder, onSuccess, reset,
+    step,
+    city,
+    contacts,
+    setCity: handleSetCity,
+    addContact,
+    addContacts,
+    updateContact,
+    removeContact,
+    reorder,
+    goToReorder,
+    goBack,
+    onSuccess,
   };
 }

@@ -4,7 +4,7 @@ import { ref, get } from "firebase/database";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import localforage from "localforage";
-import { Home, LayoutDashboard, Info, User, LogIn, Trophy, BookOpen } from "lucide-react";
+import { Home, LayoutDashboard, Info, User,Crown, LogIn, Trophy, BookOpen } from "lucide-react";
 
 export default function BottomNavbar() {
   const { user } = useContext(AuthContext);
@@ -29,7 +29,6 @@ export default function BottomNavbar() {
         setLoading(false);
       }
 
-      // ✅ Always verify from Firebase once — reads single tiny node
       const snap = await get(ref(db, `users/${user.uid}/familyId`));
       const hasFamily = snap.exists();
 
@@ -46,58 +45,57 @@ export default function BottomNavbar() {
 
   if (loading) return null;
 
-  const tab = (path) =>
-    `flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-colors ${
-      location.pathname === path
-        ? "text-blue-600"
-        : "text-gray-400"
+  const isActive = (path) => location.pathname === path;
+
+  const tabClass = (path) =>
+    `flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all duration-200 ${
+      isActive(path) ? "scale-105" : ""
     }`;
 
+  const iconColor   = (path) => isActive(path) ? "#C9A84C" : "rgba(253,246,236,0.5)";
+  const labelStyle  = (path) => ({
+    color:      isActive(path) ? "#C9A84C" : "rgba(253,246,236,0.5)",
+    fontWeight: isActive(path) ? 700 : 400,
+    fontSize:   "0.65rem",
+  });
+  const activeIndicator = (path) =>
+    isActive(path) ? (
+      <div
+        className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-5 h-0.5 rounded-full"
+        style={{ background: "#C9A84C" }}
+      />
+    ) : null;
+
+  const NavItem = ({ to, icon: Icon, label }) => (
+    <Link to={to} className={tabClass(to)} style={{ position: "relative" }}>
+      {activeIndicator(to)}
+      <Icon size={22} color={iconColor(to)} />
+      <span style={labelStyle(to)}>{label}</span>
+    </Link>
+  );
+
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 shadow-xl flex justify-around items-center py-2 z-50 safe-area-pb">
+    <nav
+      className="fixed bottom-0 left-0 right-0 flex justify-around items-center py-2 z-50 safe-area-pb"
+      style={{
+        background: "linear-gradient(135deg, #5A1020 0%, #7B1C2E 100%)",
+        borderTop: "1px solid rgba(201,168,76,0.4)",
+        boxShadow: "0 -4px 20px rgba(90,16,32,0.35)",
+      }}
+    >
+      <NavItem to="/"          icon={Home}          label="Home"        />
+      <NavItem to="/about"  icon={Crown}       label="Leaders"    />
+      <NavItem to="/contact"     icon={Info}           label="About"       />
+      <NavItem to="/connectors" icon={Trophy}        label="Competition" />
 
-      {/* 🏠 Home */}
-      <Link to="/" className={tab("/")}>
-        <Home size={22} />
-        <span className="text-xs font-medium">Home</span>
-      </Link>
-
-      {/* 🎓 Students */}
-      <Link to="/students" className={tab("/students")}>
-        <BookOpen size={22} />
-        <span className="text-xs font-medium">Students</span>
-      </Link>
-
-      {/* ℹ️ About */}
-      <Link to="/about" className={tab("/about")}>
-        <Info size={22} />
-        <span className="text-xs font-medium">About</span>
-      </Link>
-
-      {/* 🏆 Competition */}
-      <Link to="/connectors" className={tab("/connectors")}>
-        <Trophy size={22} />
-        <span className="text-xs font-medium">Competition</span>
-      </Link>
-
-      {/* 🔄 Dynamic last tab */}
+      {/* Dynamic last tab */}
       {!user?.uid ? (
-        <Link to="/login" className={tab("/login")}>
-          <LogIn size={22} />
-          <span className="text-xs font-medium">Login</span>
-        </Link>
+        <NavItem to="/login"        icon={LogIn}         label="Login"     />
       ) : registered ? (
-        <Link to="/dashboard" className={tab("/dashboard")}>
-          <LayoutDashboard size={22} />
-          <span className="text-xs font-medium">Dashboard</span>
-        </Link>
+        <NavItem to="/dashboard"    icon={LayoutDashboard} label="Dashboard" />
       ) : (
-        <Link to="/registration" className={tab("/registration")}>
-          <LayoutDashboard size={22} />
-          <span className="text-xs font-medium">Register</span>
-        </Link>
+        <NavItem to="/registration" icon={LayoutDashboard} label="Register"  />
       )}
-
     </nav>
   );
 }
