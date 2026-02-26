@@ -4,20 +4,6 @@ import { ref, update, get, push } from "firebase/database";
 import { db } from "../firebase";
 
 // ─────────────────────────────────────────────
-// Normalize mobile — handles Indian and international numbers
-// ─────────────────────────────────────────────
-function normalizeMobile(mobile) {
-  if (!mobile) return "";
-  const cleaned = String(mobile).trim();
-  if (cleaned.startsWith("+")) {
-    // International format — remove spaces, dashes, brackets only
-    return cleaned.replace(/[\s\-\(\)]/g, "");
-  }
-  // No + prefix — assume India, strip to 10 digits
-  return cleaned.replace(/\D/g, "").slice(-10);
-}
-
-// ─────────────────────────────────────────────
 // Generate unique 4-digit family PIN
 // ─────────────────────────────────────────────
 async function generateUniquePin() {
@@ -41,12 +27,16 @@ export async function submitFamilyRegistration({
     throw new Error("Add at least one family member.");
   }
 
+  // ⭐ Ensure creator selected
   const selfIndex = contacts.findIndex((c) => c.isSelf);
   if (selfIndex === -1) {
     throw new Error("Please select your contact (👤 Me).");
   }
 
+  // ⭐ Create family ID
   const familyId = push(ref(db, "families")).key;
+
+  // ⭐ Generate PIN
   const familyPin = await generateUniquePin();
 
   const ts = Date.now();
@@ -69,33 +59,29 @@ export async function submitFamilyRegistration({
     if (index === 0) headMemberId = memberId;
     if (index === selfIndex) selfMemberId = memberId;
 
-    // ✅ FIX 1: normalize mobile before storing and indexing
-    const mobile = normalizeMobile(contact.phone);
+    const mobile = (contact.phone || contact.mobile || "").trim();
 
-    const isSelf = contact.isSelf || false;
-
-    // Member node — same as app writes
+    // ⭐ MEMBER NODE (no city here)
     updates[`members/${memberId}`] = {
-      name:    contact.name.trim(),
-      mobile,
-      native:  city,
-      email:   isSelf ? (user?.email || "") : "",
-      isHead:  index === 0,
-      isSelf,
-      familyId, // ✅ always write familyId at registration
+      name: contact.name.trim(),
+      mobile: mobile,
+      native: city,
+      email: "",
+      gender: "",
+      isHead: index === 0,
+      isSelf: contact.isSelf || false,
+      isStudent: false,
     };
 
-    // ✅ FIX 1: use normalized mobile as mobileIndex key
-    if (mobile) {
-      updates[`mobileIndex/${mobile}/memberIds/${memberId}`] = true;
-      updates[`mobileIndex/${mobile}/familyIds/${familyId}`] = true;
-      updates[`mobileIndex/${mobile}/sources/familyRegistration`] = true;
-      updates[`mobileIndex/${mobile}/createdAt`] = ts;
-    }
+    // ⭐ MOBILE INDEX UPDATE
+    updates[`mobileIndex/${mobile}/memberIds/${memberId}`] = true;
+    updates[`mobileIndex/${mobile}/familyIds/${familyId}`] = true;
+    updates[`mobileIndex/${mobile}/sources/familyRegistration`] = true;
+    updates[`mobileIndex/${mobile}/createdAt`] = ts;
   });
 
   // ─────────────────────────────────────────────
-  // FAMILY NODE
+  // FAMILY NODE (city stored here)
   // ─────────────────────────────────────────────
   updates[`families/${familyId}`] = {
     familyName: `${city} Family`,
@@ -113,28 +99,28 @@ export async function submitFamilyRegistration({
   // LINK USER → MEMBER
   // ─────────────────────────────────────────────
   if (user?.uid) {
-    const selfMobile = normalizeMobile(contacts[selfIndex].phone); // ✅ FIX 1
+    const selfMobile = (contacts[selfIndex].phone || contacts[selfIndex].mobile || "").trim();
 
     updates[`users/${user.uid}/familyId`] = familyId;
     updates[`users/${user.uid}/memberId`] = selfMemberId;
-    updates[`users/${user.uid}/mobile`]   = selfMobile;
-    updates[`users/${user.uid}/role`]     = "member";
-    updates[`users/${user.uid}/status`]   = "active";
+    updates[`users/${user.uid}/mobile`] = selfMobile;
+    updates[`users/${user.uid}/role`] = "member";
+    updates[`users/${user.uid}/status`] = "active";
 
-    if (selfMobile) {
-      updates[`mobileIndex/${selfMobile}/isUser`]  = true;
-      updates[`mobileIndex/${selfMobile}/userUid`] = user.uid;
-    }
+    // ⭐ MOBILE INDEX — mark as registered user
+    updates[`mobileIndex/${selfMobile}/isUser`] = true;
+    updates[`mobileIndex/${selfMobile}/userUid`] = user.uid;
   }
 
   // ─────────────────────────────────────────────
-  // EMAIL INDEX
+  // EMAIL INDEX (optional but recommended)
   // ─────────────────────────────────────────────
   if (user?.email) {
     const emailKey = user.email
       .toLowerCase()
       .replace(/\./g, ",")
       .replace(/@/g, "_");
+
     updates[`usersByEmail/${emailKey}`] = user.uid;
   }
 

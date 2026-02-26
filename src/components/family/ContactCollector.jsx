@@ -11,7 +11,7 @@ export function ContactCollector({ city, contacts, onAdd, onAddMany, onUpdate, o
 
   const { pick, picking, error: pickErr, isSupported } = useContactPicker();
 
-  const allFilled   = contacts.length > 0 && contacts.every((c) => c.name.trim() && c.phone.trim());
+  const allFilled   = contacts.length > 0 && contacts.every((c) => (c.name || "").trim() && (c.phone || c.mobile || "").trim());
   const confirmText = contacts.length === 0
     ? "Add at least one contact"
     : `Confirm ${contacts.length} Contact${contacts.length > 1 ? "s" : ""} →`;

@@ -159,7 +159,7 @@ export function ContactReorder({
             {/* Info */}
             <div className="flex-1">
               <p className="text-sm font-bold">{c.name || "—"}</p>
-              <p className="text-xs text-gray-400">{c.phone}</p>
+              <p className="text-xs text-gray-400">{c.phone || c.mobile || "—"}</p>
             </div>
 
             {/* 👑 Head */}

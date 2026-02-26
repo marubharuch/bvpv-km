@@ -11,7 +11,8 @@ import {
 // CONSTANTS
 // ─────────────────────────────────────────────
 const EMPTY_FORM = {
-  name: "", mobile: "", email: "", gender: "", dob: "",
+  name: "", countryCode: "+91", mobile: "", email: "", gender: "",
+  dobDay: "", dobMonth: "", dobYear: "",
   married: false, stayAway: false, stayCity: "",
   isStudent: false, occupation: "",
   educationType: "", standard: "", stream: "", medium: "",
@@ -47,7 +48,22 @@ const DIPLOMA_YEARS        = ["Year 1","Year 2","Year 3"];
 const DEGREE_PROGRAMS      = ["BSc","BCom","BA","BBA","BE/BTech","MBBS","BDS","BPharma","Law","Other"];
 const PROFESSIONAL_COURSES = ["CA","CS","CMA","CFA","Other"];
 const PROFESSIONAL_STAGES  = ["Foundation","Inter","Final"];
-const NEEDS_STREAM         = ["11th","12th"]; // ✅ FIX 5
+const NEEDS_STREAM         = ["11th","12th"];
+
+const COUNTRY_CODES = [
+  { code: "+91",  flag: "🇮🇳", name: "India" },
+  { code: "+1",   flag: "🇺🇸", name: "USA/Canada" },
+  { code: "+44",  flag: "🇬🇧", name: "UK" },
+  { code: "+61",  flag: "🇦🇺", name: "Australia" },
+  { code: "+971", flag: "🇦🇪", name: "UAE" },
+  { code: "+974", flag: "🇶🇦", name: "Qatar" },
+  { code: "+965", flag: "🇰🇼", name: "Kuwait" },
+  { code: "+968", flag: "🇴🇲", name: "Oman" },
+  { code: "+60",  flag: "🇲🇾", name: "Malaysia" },
+  { code: "+65",  flag: "🇸🇬", name: "Singapore" },
+  { code: "+49",  flag: "🇩🇪", name: "Germany" },
+  { code: "+81",  flag: "🇯🇵", name: "Japan" },
+];
 
 const SKILL_CATEGORIES = [
   { key: "indoorSports",  label: "Indoor Sports",  emoji: "🏓", options: ["Chess","Carrom","TT","Badminton (Indoor)","Snooker"] },
@@ -181,18 +197,129 @@ function SkillChip({ label, selected, onToggle }) {
 // TAB CONTENT
 // ─────────────────────────────────────────────
 function TabBasic({ form, update, errors }) {
+  const DAYS   = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
+  const MONTHS = [
+    { v: "01", l: "Jan" }, { v: "02", l: "Feb" }, { v: "03", l: "Mar" },
+    { v: "04", l: "Apr" }, { v: "05", l: "May" }, { v: "06", l: "Jun" },
+    { v: "07", l: "Jul" }, { v: "08", l: "Aug" }, { v: "09", l: "Sep" },
+    { v: "10", l: "Oct" }, { v: "11", l: "Nov" }, { v: "12", l: "Dec" },
+  ];
+  const currentYear = new Date().getFullYear();
+  const YEARS = Array.from({ length: 100 }, (_, i) => String(currentYear - i));
+
   return (
     <div className="space-y-4 px-4 py-4">
+
+      {/* Name */}
       <TextInput label="Full Name *" value={form.name} onChange={v => update("name", v)}
         placeholder="e.g. Ramesh Patel" error={errors.name} />
-      <TextInput label="Mobile Number" value={form.mobile} onChange={v => update("mobile", v)}
-        placeholder="10-digit number" inputMode="numeric" maxLength={10} error={errors.mobile} />
+
+      {/* Mobile — country code + number split */}
+      <div>
+        <FieldLabel>Mobile Number</FieldLabel>
+        <div className="flex gap-2">
+          {/* Country code dropdown */}
+          <div className="relative flex-shrink-0">
+            <select
+              value={form.countryCode || "+91"}
+              onChange={e => update("countryCode", e.target.value)}
+              style={{
+                fontSize: 14,
+                border: "2px solid #f0e6e6",
+                background: "#fff",
+                color: "#3D0010",
+                appearance: "none",
+                WebkitAppearance: "none",
+                minWidth: 80,
+              }}
+              className="rounded-xl px-2 py-3 outline-none focus:border-[#C9A84C] transition-colors pr-6"
+            >
+              {COUNTRY_CODES.map(c => (
+                <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
+              ))}
+            </select>
+            <ChevronRight size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none"
+              style={{ color: "#9B6060" }} />
+          </div>
+          {/* Number input */}
+          <input
+            type="tel"
+            inputMode="numeric"
+            value={form.mobile}
+            onChange={e => update("mobile", e.target.value.replace(/\D/g, ""))}
+            placeholder="Mobile number"
+            maxLength={15}
+            style={{
+              fontSize: 16,
+              border: errors.mobile ? "2px solid #ef4444" : "2px solid #f0e6e6",
+              background: "#fff",
+              color: "#3D0010",
+            }}
+            className="flex-1 rounded-xl px-4 py-3 outline-none focus:border-[#C9A84C] transition-colors"
+          />
+        </div>
+        {errors.mobile && <p className="text-xs text-red-500 mt-1">{errors.mobile}</p>}
+      </div>
+
+      {/* Email */}
       <TextInput label="Email" value={form.email} onChange={v => update("email", v)}
         placeholder="email@example.com" type="email" />
+
+      {/* Gender */}
       <PillSelect label="Gender" value={form.gender} onChange={v => update("gender", v)}
         options={["Male","Female","Other"]} />
-      <TextInput label="Date of Birth" value={form.dob} onChange={v => update("dob", v)}
-        placeholder="DD/MM/YYYY" inputMode="numeric" />
+
+      {/* DOB — split into Day / Month / Year */}
+      <div>
+        <FieldLabel>Date of Birth</FieldLabel>
+        <div className="flex gap-2">
+          {/* Day */}
+          <div className="relative flex-1">
+            <select value={form.dobDay || ""} onChange={e => update("dobDay", e.target.value)}
+              style={{
+                fontSize: 16, border: "2px solid #f0e6e6", background: "#fff",
+                color: form.dobDay ? "#3D0010" : "#9B6060",
+                appearance: "none", WebkitAppearance: "none",
+              }}
+              className="w-full rounded-xl px-3 py-3 outline-none focus:border-[#C9A84C] transition-colors pr-7">
+              <option value="">Day</option>
+              {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <ChevronRight size={12} className="absolute right-2 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none"
+              style={{ color: "#9B6060" }} />
+          </div>
+          {/* Month */}
+          <div className="relative flex-1">
+            <select value={form.dobMonth || ""} onChange={e => update("dobMonth", e.target.value)}
+              style={{
+                fontSize: 16, border: "2px solid #f0e6e6", background: "#fff",
+                color: form.dobMonth ? "#3D0010" : "#9B6060",
+                appearance: "none", WebkitAppearance: "none",
+              }}
+              className="w-full rounded-xl px-3 py-3 outline-none focus:border-[#C9A84C] transition-colors pr-7">
+              <option value="">Month</option>
+              {MONTHS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+            </select>
+            <ChevronRight size={12} className="absolute right-2 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none"
+              style={{ color: "#9B6060" }} />
+          </div>
+          {/* Year — text input, faster than scrolling 100 years */}
+          <input
+            type="tel"
+            inputMode="numeric"
+            value={form.dobYear || ""}
+            onChange={e => update("dobYear", e.target.value.replace(/\D/g, "").slice(0, 4))}
+            placeholder="Year"
+            maxLength={4}
+            style={{
+              fontSize: 16, border: "2px solid #f0e6e6",
+              background: "#fff", color: "#3D0010",
+            }}
+            className="flex-1 rounded-xl px-3 py-3 outline-none focus:border-[#C9A84C] transition-colors"
+          />
+        </div>
+      </div>
+
       <BigToggle value={form.married} onChange={() => update("married", !form.married)}
         labelOn="Married ✓" labelOff="Unmarried" />
       <BigToggle value={form.stayAway} onChange={() => update("stayAway", !form.stayAway)}
@@ -453,10 +580,10 @@ function TabFinancial({ form, update }) {
 function ReviewScreen({ form, onEdit, onSave, saving, isAdding }) {
   const rows = [
     { label: "Name",       value: form.name },
-    { label: "Mobile",     value: form.mobile },
+    { label: "Mobile",     value: form.mobile ? `${form.countryCode || "+91"} ${form.mobile}` : "" },
     { label: "Email",      value: form.email },
     { label: "Gender",     value: form.gender },
-    { label: "DOB",        value: form.dob },
+    { label: "DOB",        value: (form.dobDay && form.dobMonth && form.dobYear) ? `${form.dobDay}/${form.dobMonth}/${form.dobYear}` : "" },
     { label: "Status",     value: form.married ? "Married" : "Unmarried" },
     { label: "Stays",      value: form.stayAway ? `Away – ${form.stayCity || "?"}` : "At home" },
     { label: "Student",    value: form.isStudent ? "Yes" : "No" },
@@ -550,12 +677,31 @@ export default function EditMemberModal({ open, mode = "edit", member = null, fa
         setForm({ ...EMPTY_FORM });
       } else {
         if (!member) return;
+        // Split stored mobile back into countryCode + number
+        let countryCode = "+91";
+        let mobileNum   = member.mobile || member.phone || "";
+        if (mobileNum.startsWith("+")) {
+          const match = COUNTRY_CODES.find(c => mobileNum.startsWith(c.code));
+          if (match) { countryCode = match.code; mobileNum = mobileNum.slice(match.code.length); }
+        }
+
+        // Split stored dob "DD/MM/YYYY" back into parts
+        const dobParts  = (member.dob || "").split("/");
+        const dobDay    = dobParts[0] || "";
+        const dobMonth  = dobParts[1] || "";
+        const dobYear   = dobParts[2] || "";
+
         setForm({
           ...EMPTY_FORM,
-          name: member.name || "", mobile: member.mobile || member.phone || "",
-          email: member.email || "", gender: member.gender || "",
-          dob: member.dob || "", married: member.married || false,
-          stayAway: member.stayAway || false, stayCity: member.stayCity || "",
+          name:           member.name          || "",
+          countryCode,
+          mobile:         mobileNum,
+          email:          member.email         || "",
+          gender:         member.gender        || "",
+          dobDay, dobMonth, dobYear,
+          married:        member.married       || false,
+          stayAway:       member.stayAway      || false,
+          stayCity:       member.stayCity      || "",
           isStudent: member.isStudent || false, occupation: member.occupation || "",
           educationType: member.educationType || "", standard: member.standard || "",
           stream: member.stream || "", medium: member.medium || "",
@@ -595,12 +741,8 @@ export default function EditMemberModal({ open, mode = "edit", member = null, fa
     const errs = {};
     if (!form?.name?.trim()) errs.name = "Name is required";
     if (form?.mobile) {
-      const m = form.mobile.trim();
-      const validIndia = /^\d{10}$/.test(m);
-      const validIntl  = /^\+\d{7,15}$/.test(m.replace(/[\s\-\(\)]/g, ""));
-      if (!validIndia && !validIntl) {
-        errs.mobile = "Enter 10-digit number or international format (+44...)";
-      }
+      const digits = form.mobile.replace(/\D/g, "");
+      if (digits.length < 7) errs.mobile = "Enter a valid mobile number";
     }
     setErrors(errs);
     if (Object.keys(errs).length > 0) { setActiveTab("basic"); return false; }
@@ -612,9 +754,24 @@ export default function EditMemberModal({ open, mode = "edit", member = null, fa
   const handleSave = async () => {
     setSaving(true);
     try {
+      // ── Assemble mobile: countryCode + number
+      const assembledMobile = form.mobile?.trim()
+        ? normalizeMobile(`${form.countryCode || "+91"}${form.mobile.trim()}`)
+        : "";
+
+      // ── Assemble DOB: DD/MM/YYYY
+      const assembledDob = (form.dobDay && form.dobMonth && form.dobYear)
+        ? `${form.dobDay}/${form.dobMonth}/${form.dobYear}`
+        : "";
+
+      // ── Name: proper case
+      const assembledName = form.name?.trim()
+        ? form.name.trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+        : "";
+
       let education = "";
       if (form.isStudent) {
-        if (form.educationType === "School Student")      education = form.standard;
+        if (form.educationType === "School Student")       education = form.standard;
         else if (form.educationType === "College Student") education = `${form.degree || ""} ${form.year || ""}`.trim();
         else if (form.educationType === "Postgraduate")    education = `PG ${form.year || ""}`.trim();
         else if (form.educationType === "Diploma / ITI")  education = `Diploma ${form.year || ""}`.trim();
@@ -622,7 +779,18 @@ export default function EditMemberModal({ open, mode = "edit", member = null, fa
         else if (form.educationType === "Competitive Prep")    education = form.exam;
       }
 
-      const payload = { ...form, education };
+      const payload = {
+        ...form,
+        name:   assembledName,
+        mobile: assembledMobile,
+        dob:    assembledDob,
+        education,
+      };
+      // Remove UI-only split fields from DB payload
+      delete payload.countryCode;
+      delete payload.dobDay;
+      delete payload.dobMonth;
+      delete payload.dobYear;
 
       if (isAdding) {
         const newMemberRef = push(ref(db, "members"));
