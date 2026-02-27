@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import AppLayout from "./layouts/AppLayout";
 import PrivateRoute from "./components/PrivateRoute";
 
@@ -19,6 +19,11 @@ import LeaderboardPage from "./pages/LeaderboardPage";
 import ContactOnboardingPage from "./pages/ContactOnboardingPage";
 import RegisterList from "./pages/RegisterList";
 
+function RegistrationWithNav() {
+  const navigate = useNavigate();
+  return <Registration onDone={() => navigate("/dashboard", { replace: true })} />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -30,7 +35,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
-        <Route path="/registration" element={<Registration />} />
+        <Route path="/registration" element={<RegistrationWithNav />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
