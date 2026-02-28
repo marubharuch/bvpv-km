@@ -167,7 +167,7 @@ export const getOptimizedImageUrl = (originalUrl, options = {}) => {
 /**
  * Generate passport-optimized URL from Cloudinary
  */
-export const getPassportPhotoUrl = (originalUrl) => {
+export const getPassportphotoURL = (originalUrl) => {
   if (!originalUrl || !originalUrl.includes('cloudinary.com')) {
     return originalUrl;
   }
@@ -244,7 +244,7 @@ const insertTransformation = (url, transformation) => {
 /**
  * Generate URL for profile display
  */
-export const getProfilePhotoUrl = (originalUrl) => {
+export const getProfilephotoURL = (originalUrl) => {
   if (!originalUrl || !originalUrl.includes('cloudinary.com')) {
     return originalUrl;
   }

@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from "react";
-import { ref, update } from "firebase/database";
+import { updateMember, batchWrite } from "../services/rtdbService";
+import { ref, get } from "firebase/database";
 import { db } from "../firebase";
 
 import Cropper from "react-easy-crop";
@@ -10,7 +11,7 @@ import { uploadToCloudinary } from "../services/cloudinaryService";
 export default function ImageUploadBox({
   familyId,
   memberId,
-  photoUrl
+  photoURL
 }) {
   const fileInput = useRef();
 
@@ -24,7 +25,7 @@ export default function ImageUploadBox({
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
   const handleClick = () => {
-    if (photoUrl) {
+    if (photoURL) {
       const replace = window.confirm("Replace existing photo?");
       if (!replace) return;
     }
@@ -100,14 +101,23 @@ export default function ImageUploadBox({
       // ⭐ Upload to Cloudinary (UNCHANGED)
       const url = await uploadToCloudinary(compressed);
 
-      // ⭐ Save URL to RTDB (UNCHANGED)
-      await update(
-        ref(db, `members/${memberId}`),
-        {
-          photoUrl: url,
-          updatedAt: Date.now()
-        }
-      );
+      // ⭐ Save URL to RTDB — also sync honoraryIndex entries for this member
+      const ts = Date.now();
+      const writes = {};
+
+      writes[`members/${memberId}/photoURL`] = url;
+      writes[`members/${memberId}/updatedAt`] = ts;
+
+      // Sync photoURL into any honoraryIndex entries for this member
+      const memberSnap = await get(ref(db, `members/${memberId}`));
+      const memberData = memberSnap.exists() ? memberSnap.val() : {};
+      (memberData.honoraryOrgs || []).forEach(entry => {
+        if (!entry.orgId || !entry.post) return;
+        writes[`honoraryIndex/${entry.orgId}/${memberId}/photoURL`] = url;
+        writes[`honoraryIndex/${entry.orgId}/${memberId}/updatedAt`] = ts;
+      });
+
+      await batchWrite(writes);
 
       setImageSrc(null);
 
@@ -129,8 +139,8 @@ export default function ImageUploadBox({
       >
         {uploading ? (
           <span className="text-xs">Uploading...</span>
-        ) : photoUrl ? (
-          <img src={photoUrl} alt="member" className="w-full h-full object-cover" />
+        ) : photoURL ? (
+          <img src={photoURL} alt="member" className="w-full h-full object-cover" />
         ) : (
           <span className="text-2xl text-gray-500">📷</span>
         )}

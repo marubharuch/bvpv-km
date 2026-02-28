@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState, useCallback, useRef } from "react";
 import { signOut } from "firebase/auth";
-import { ref, get, set, update } from "firebase/database";
+import { ref, get } from "firebase/database";
+import { writeUser, updateFamily } from "../services/rtdbService";
 import { db, auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
@@ -128,7 +129,7 @@ export default function DashboardPage() {
       if (emailSnap.exists()) {
         const oldData = emailSnap.val();
         famId = oldData.familyId;
-        await set(ref(db, `users/${user.uid}`), { ...oldData, email: user.email });
+        await writeUser(user.uid, { ...oldData, email: user.email });
       }
     }
 
@@ -161,7 +162,7 @@ export default function DashboardPage() {
   };
 
   const saveFamilyField = async (field, value) => {
-    await update(ref(db, `families/${familyId}`), { [field]: value });
+    await updateFamily(familyId, { [field]: value });
     await patchCache(fam => ({ ...fam, [field]: value }));
   };
 
@@ -306,7 +307,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── AVATAR STRIP ── */}
-      <div className="px-4 -mt-3 relative z-10">
+    {/*  <div className="px-4 -mt-3 relative z-10">
         <div className="bg-white rounded-2xl p-4" style={{ boxShadow: "0 4px 20px rgba(90,16,32,0.12)" }}>
           <h3 className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: "#7B1C2E" }}>
             Family Members
@@ -317,8 +318,9 @@ export default function DashboardPage() {
                 className="flex flex-col items-center flex-shrink-0 gap-1">
                 <div className="rounded-full overflow-hidden bg-gray-100 flex items-center justify-center border-2"
                   style={{ width: 52, height: 52, borderColor: m.isHead ? "#C9A84C" : m.isStudent ? "#7B1C2E" : "#e5e7eb" }}>
-                  {m.photoUrl
-                    ? <img src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
+
+                  {m.photoURL
+                    ? <img src={m.photoURL} alt={m.name} className="w-full h-full object-cover" />
                     : <span className="text-lg font-bold" style={{ color: "#7B1C2E" }}>{(m.name || "?")[0].toUpperCase()}</span>
                   }
                 </div>
@@ -337,7 +339,7 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
-      </div>
+      </div>/*}
 
       {/* ── TAB FILTER ── */}
       <div className="px-4 mt-4">
@@ -369,7 +371,7 @@ export default function DashboardPage() {
           <div key={member.id} className="bg-white rounded-xl overflow-hidden"
             style={{ boxShadow: "0 2px 10px rgba(90,16,32,0.08)" }}>
             <div className="flex items-start gap-3 p-3">
-              <ImageUploadBox familyId={familyId} memberId={member.id} photoUrl={member.photoUrl} />
+              <ImageUploadBox familyId={familyId} memberId={member.id} photoURL={member.photoURL} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <p className="font-semibold text-sm" style={{ color: "#5A1020" }}>{toProperCase(member.name) || "—"}</p>

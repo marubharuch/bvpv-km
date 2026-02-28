@@ -1,6 +1,7 @@
 import { createContext, useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { ref, get,set } from "firebase/database";
+import { ref, get } from "firebase/database";
+import { writeUser } from "../services/rtdbService";
 import { db } from "../firebase";
 import { saveCache, loadCache } from "../utils/cache";
 
@@ -69,7 +70,7 @@ if (userSnap.exists()) {
     // 🔥 OPTIONAL AUTO-MIGRATION (recommended)
     // Save under UID for future use
     await saveCache(`migrated_${u.uid}`, true);
-    await set(ref(db, `users/${u.uid}`), {
+    await writeUser(u.uid, {
       ...userData,
       email: u.email
     });

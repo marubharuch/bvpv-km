@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ref, update, push } from "firebase/database";
+import { ref, push } from "firebase/database";
 import { db } from "../../firebase";
+import { batchWrite } from "../../services/rtdbService";
 import { saveCache, loadCache } from "../../utils/cache";
 import {
   User, GraduationCap, Star, IndianRupee, Award,
@@ -33,6 +34,9 @@ const TABS = [
   { id: "honorary",  label: "હોદ્દો",   icon: Award },
 ];
 
+const TAB_IDS = TABS.map(t => t.id);
+const LAST_TAB = TAB_IDS[TAB_IDS.length - 1];
+
 const EDUCATION_TYPES = ["School Student","College Student","Postgraduate","Diploma / ITI","Professional Course","Competitive Prep"];
 const SCHOOL_STANDARDS = ["Nursery","Jr KG","Sr KG","1st","2nd","3rd","4th","5th","6th","7th","8th","9th","10th","11th","12th"];
 const COLLEGE_YEARS    = ["1st Year","2nd Year","3rd Year","Final Year"];
@@ -61,7 +65,6 @@ const SKILL_CATEGORIES = [
   { key: "funActivities", label: "Fun",            emoji: "🎉", options: ["Antakshari","Quiz","One Minute Games","Dumb Charades"] },
 ];
 
-// All org IDs — used to clear old honoraryIndex on save
 const ALL_ORG_IDS = ["kadavani","seva","suraksha","sthanik","other"];
 
 const KNOWN_ORGS = [
@@ -72,7 +75,7 @@ const KNOWN_ORGS = [
   { id: "other",     label: "અન્ય સંસ્થા",      askName: true  },
 ];
 
-const POST_SUGGESTIONS = ["પ્રમુખ","ઉપ-પ્રમુખ","મંત્રી","સહ-મંત્રી","ખજાનચી","ટ્રસ્ટી","સભ્ય","સંયોજક","અન્ય"];
+const POST_SUGGESTIONS = ["પ્રમુખ","ઉપ-પ્રમુખ","મંત્રી","સહ-મંત્રી","ખજાનચી","ટ્રસ્ટી","કારોબારી સભ્ય","સંયોજક"];
 
 function normalizeMobile(mobile) {
   if (!mobile) return "";
@@ -237,14 +240,27 @@ function TabBasic({ form, update, errors }) {
       <div>
         <FieldLabel>Mobile Number</FieldLabel>
         <div className="flex gap-2">
-          <div className="relative flex-shrink-0">
-            <select value={form.countryCode||"+91"} onChange={e => update("countryCode",e.target.value)}
-              style={{fontSize:14,border:"2px solid #f0e6e6",background:"#fff",color:"#3D0010",appearance:"none",WebkitAppearance:"none",minWidth:80}}
-              className="rounded-xl px-2 py-3 outline-none focus:border-[#C9A84C] transition-colors pr-6">
-              {COUNTRY_CODES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
-            </select>
-            <ChevronRight size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" style={{color:"#9B6060"}} />
-          </div>
+        
+<input
+  type="tel"
+  inputMode="numeric"
+  value={form.countryCode || "+91"}
+  onChange={e => {
+    let val = e.target.value;
+    if (!val.startsWith("+")) val = "+" + val.replace(/\+/g, "");
+    update("countryCode", val);
+  }}
+  maxLength={5}
+  style={{
+    fontSize: 14,
+    border: "2px solid #f0e6e6",
+    background: "#fff",
+    color: "#3D0010",
+    minWidth: 70,
+    textAlign: "center"
+  }}
+  className="rounded-xl px-2 py-3 outline-none focus:border-[#C9A84C] transition-colors"
+/>
           <input type="tel" inputMode="numeric" value={form.mobile}
             onChange={e => update("mobile",e.target.value.replace(/\D/g,""))} placeholder="Mobile number" maxLength={15}
             style={{fontSize:16,border: errors.mobile ? "2px solid #ef4444" : "2px solid #f0e6e6",background:"#fff",color:"#3D0010"}}
@@ -544,7 +560,7 @@ function ReviewScreen({ form, onEdit, onSave, saving, isAdding }) {
           </div>
         )}
       </div>
-      <div className="flex gap-3 px-4 pt-3 border-t" style={{borderColor:"#f0e6e6",paddingBottom:"calc(80px + env(safe-area-inset-bottom, 0px))"}}>
+      <div className="flex gap-3 px-4 pt-3 pb-6 border-t" style={{borderColor:"#f0e6e6"}}>
         <button onClick={onEdit} className="flex-1 py-3.5 rounded-xl text-sm font-semibold border-2" style={{borderColor:"#f0e6e6",color:"#7B1C2E"}}>← Edit</button>
         <button onClick={onSave} disabled={saving} className="flex-1 py-3.5 rounded-xl text-sm font-bold text-white disabled:opacity-60" style={{background:"#7B1C2E"}}>
           {saving ? "Saving..." : isAdding ? "Add Member ✓" : "Save ✓"}
@@ -652,10 +668,25 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
     return true;
   };
 
-  const handleGoToReview = () => { if (validate()) setShowReview(true); };
+  // ── Tab navigation ──
+  const currentTabIndex = TAB_IDS.indexOf(activeTab);
+  const isFirstTab = currentTabIndex === 0;
+  const isLastTab  = activeTab === LAST_TAB;
+
+  const goNext = () => {
+    if (isLastTab) {
+      if (validate()) setShowReview(true);
+    } else {
+      setActiveTab(TAB_IDS[currentTabIndex + 1]);
+    }
+  };
+  const goBack = () => {
+    if (showReview) { setShowReview(false); return; }
+    if (!isFirstTab) setActiveTab(TAB_IDS[currentTabIndex - 1]);
+  };
 
   // ─────────────────────────────────────────────
-  // ✅ handleSave — writes member + honoraryIndex
+  // ✅ handleSave
   // ─────────────────────────────────────────────
   const handleSave = async () => {
     setSaving(true);
@@ -689,15 +720,13 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
       const ts       = Date.now();
       const writes   = {};
 
-      // ── 1. Member document ──
       if (isAdding) {
         writes[`members/${memberId}`]                    = { ...payload, familyId, createdAt: ts };
         writes[`families/${familyId}/members/${memberId}`] = true;
       } else {
-        writes[`members/${memberId}`] = { ...payload, updatedAt: ts };
+        writes[`members/${memberId}`] = { ...member,...payload, updatedAt: ts };
       }
 
-      // ── 2. Mobile index ──
       if (assembledMobile) {
         const mob = normalizeMobile(assembledMobile);
         if (mob) {
@@ -708,28 +737,23 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
         }
       }
 
-      // ── 3. Honorary index ──
-      // First clear ALL existing entries for this member across every org
-      // (handles removed/changed posts correctly)
       ALL_ORG_IDS.forEach(orgId => {
-        writes[`honoraryIndex/${orgId}/${memberId}`] = null; // null = delete in RTDB
+        writes[`honoraryIndex/${orgId}/${memberId}`] = null;
       });
-      // Then write fresh entries only for orgs with a post selected
       (payload.honoraryOrgs || []).forEach(entry => {
         if (!entry.orgId || !entry.post) return;
         writes[`honoraryIndex/${entry.orgId}/${memberId}`] = {
-          memberId,
-          familyId,
+          memberId, familyId,
           memberName: assembledName,
           mobile:     assembledMobile,
           photoURL:   payload.photoURL || "",
           post:       entry.post,
-          orgName:    entry.name || "", // custom name for sthanik/other
+          orgName:    entry.name || "",
           updatedAt:  ts,
         };
       });
 
-      await update(ref(db), writes);
+      await batchWrite(writes);
       await saveCache(draftKey, {});
       onClose(true, isAdding
         ? { id: memberId, familyId, ...payload }
@@ -755,13 +779,22 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
 
   return (
     <>
+      {/* Backdrop */}
       <div className="fixed inset-0 z-40" style={{background:"rgba(0,0,0,0.5)"}} onClick={()=>onClose(false)} />
-      <div className="fixed left-0 right-0 bottom-0 z-50 flex flex-col rounded-t-3xl"
-        style={{background:"#FDF6EC",maxHeight:"85vh",boxShadow:"0 -8px 40px rgba(90,16,32,0.25)",overflow:"hidden"}}>
-        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full" style={{background:"#C9A84C"}} />
-        </div>
-        <div className="flex items-center justify-between px-4 pb-3 flex-shrink-0">
+
+      {/* Modal — slides from TOP */}
+      <div
+        className="fixed left-0 right-0 top-0 z-50 flex flex-col rounded-b-3xl"
+        style={{
+          background: "#FDF6EC",
+          maxHeight: "92vh",
+          boxShadow: "0 8px 40px rgba(90,16,32,0.25)",
+          overflow: "hidden",
+          paddingTop: "env(safe-area-inset-top, 0px)",
+        }}
+      >
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{borderBottom:"1px solid #f0e6e6"}}>
           <h2 className="text-base font-bold" style={{color:"#5A1020"}}>
             {showReview ? "Review Details" : isAdding ? "Add Member" : "Edit Member"}
           </h2>
@@ -769,15 +802,26 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
             <X size={16} style={{color:"#7B1C2E"}} />
           </button>
         </div>
+
+        {/* ── Tab Bar (always visible, fixed below header) ── */}
         {!showReview && (
-          <div className="flex border-b flex-shrink-0 px-2" style={{borderColor:"#f0e6e6"}}>
-            {TABS.map(tab => {
-              const Icon=tab.icon, active=activeTab===tab.id;
+          <div className="flex flex-shrink-0 px-2" style={{borderBottom:"2px solid #f0e6e6", background:"#FDF6EC"}}>
+            {TABS.map((tab, idx) => {
+              const Icon   = tab.icon;
+              const active = activeTab === tab.id;
+              const done   = idx < currentTabIndex;
               return (
                 <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
                   className="flex-1 flex flex-col items-center gap-0.5 py-2 text-xs font-semibold transition-all relative"
-                  style={{color: active ? "#7B1C2E" : "#C0A0A0"}}>
-                  <Icon size={16} />
+                  style={{color: active ? "#7B1C2E" : done ? "#C9A84C" : "#C0A0A0"}}>
+                  <div className="relative">
+                    <Icon size={16} />
+                    {done && (
+                      <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center" style={{background:"#C9A84C"}}>
+                        <Check size={8} color="#fff" strokeWidth={3} />
+                      </div>
+                    )}
+                  </div>
                   {tab.label}
                   {active && <div className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full" style={{background:"#C9A84C"}} />}
                 </button>
@@ -785,21 +829,32 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
             })}
           </div>
         )}
+
+        {/* ── Scrollable Content ── */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0" style={{WebkitOverflowScrolling:"touch"}}>
           {showReview
             ? <ReviewScreen form={form} onEdit={()=>setShowReview(false)} onSave={handleSave} saving={saving} isAdding={isAdding} />
-            : (<>
-                {tabContent[activeTab]}
-                <div className="flex gap-3 px-4 pt-2 mt-2 border-t"
-                  style={{borderColor:"#f0e6e6",paddingBottom:"calc(80px + env(safe-area-inset-bottom, 0px))"}}>
-                  <button onClick={()=>onClose(false)} className="flex-1 py-3.5 rounded-xl text-sm font-semibold border-2"
-                    style={{borderColor:"#f0e6e6",color:"#7B1C2E"}}>Cancel</button>
-                  <button onClick={handleGoToReview} className="flex-1 py-3.5 rounded-xl text-sm font-bold text-white"
-                    style={{background:"#7B1C2E"}}>Review →</button>
-                </div>
-              </>)
+            : tabContent[activeTab]
           }
         </div>
+
+        {/* ── Bottom Nav: Back | Next/Review ── */}
+        {!showReview && (
+          <div className="flex gap-3 px-4 py-3 flex-shrink-0" style={{borderTop:"1px solid #f0e6e6", paddingBottom:"calc(12px + env(safe-area-inset-bottom, 0px))"}}>
+            {!isFirstTab && (
+              <button onClick={goBack}
+                className="flex-1 py-3.5 rounded-xl text-sm font-semibold border-2"
+                style={{borderColor:"#f0e6e6", color:"#7B1C2E"}}>
+                ← Back
+              </button>
+            )}
+            <button onClick={goNext}
+              className="py-3.5 rounded-xl text-sm font-bold text-white transition-all"
+              style={{background:"#7B1C2E", flex: isFirstTab ? 1 : 1}}>
+              {isLastTab ? "Review →" : "Next →"}
+            </button>
+          </div>
+        )}
       </div>
     </>
   );

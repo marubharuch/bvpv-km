@@ -1,5 +1,6 @@
 import { useState, useEffect, useContext } from "react";
-import { ref, get, update } from "firebase/database";
+import { ref, get } from "firebase/database";
+import { batchWrite, updateConnector } from "../services/rtdbService";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -72,7 +73,7 @@ export default function ConnectorsPage() {
       };
     });
 
-    await update(ref(db), updates);
+    await batchWrite(updates);
 
     alert("Contacts uploaded");
     window.location.reload();
@@ -89,7 +90,7 @@ export default function ConnectorsPage() {
       "_blank"
     );
 
-    await update(ref(db, `connectors/${contact.id}`), {
+    await updateConnector(contact.id, {
       invitedBy: user.uid,
       invitedAt: Date.now()
     });

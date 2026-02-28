@@ -7,7 +7,8 @@ import {
   createUserWithEmailAndPassword
 } from "firebase/auth";
 
-import { ref, get, set, update } from "firebase/database";
+import { ref, get, set } from "firebase/database";
+import { writeUser, writeUserEmailIndex } from "../services/rtdbService";
 import { db } from "../firebase";
 import { useNavigate } from "react-router-dom";
 
@@ -15,6 +16,8 @@ export default function AuthPage() {
   const [tab, setTab] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("");
 
   const navigate = useNavigate();
   const auth = getAuth();
@@ -38,7 +41,6 @@ export default function AuthPage() {
         createdAt: Date.now()
       });
 
-      // email index
       if (user.email) {
         const emailKey = user.email
           .trim()
@@ -63,7 +65,6 @@ export default function AuthPage() {
       .replace(/\./g, ",")
       .replace(/@/g, "_");
 
-    // old emailKey record
     const emailSnap = await get(ref(db, `users/${emailKey}`));
 
     if (!emailSnap.exists()) return false;
@@ -86,11 +87,13 @@ export default function AuthPage() {
   // 🔵 GOOGLE LOGIN
   // ─────────────────────────────────────────────
   const loginWithGoogle = async () => {
+    setLoading(true);
+    setLoadingMsg("Signing in with Google...");
     try {
       const provider = new GoogleAuthProvider();
       const res = await signInWithPopup(auth, provider);
 
-      // 🔥 ALWAYS create user node
+      setLoadingMsg("Setting up your account...");
       await ensureUserRecord(res.user);
 
       const mapped = await connectFamily(res.user);
@@ -101,15 +104,19 @@ export default function AuthPage() {
     } catch {
       alert("Google login failed");
     }
+    setLoading(false);
   };
 
   // ─────────────────────────────────────────────
   // 🔵 EMAIL LOGIN
   // ─────────────────────────────────────────────
   const login = async () => {
+    setLoading(true);
+    setLoadingMsg("Logging in...");
     try {
       const res = await signInWithEmailAndPassword(auth, email, password);
 
+      setLoadingMsg("Setting up your account...");
       await ensureUserRecord(res.user);
 
       const mapped = await connectFamily(res.user);
@@ -120,15 +127,19 @@ export default function AuthPage() {
     } catch {
       alert("Invalid email or password");
     }
+    setLoading(false);
   };
 
   // ─────────────────────────────────────────────
   // 🟢 REGISTER (Email)
   // ─────────────────────────────────────────────
   const register = async () => {
+    setLoading(true);
+    setLoadingMsg("Creating your account...");
     try {
       const res = await createUserWithEmailAndPassword(auth, email, password);
 
+      setLoadingMsg("Setting up your account...");
       await ensureUserRecord(res.user);
 
       const mapped = await connectFamily(res.user);
@@ -139,6 +150,7 @@ export default function AuthPage() {
     } catch (e) {
       alert(e.message);
     }
+    setLoading(false);
   };
 
   // ─────────────────────────────────────────────
@@ -147,6 +159,14 @@ export default function AuthPage() {
   return (
     <div className="max-w-md mx-auto p-6 space-y-5">
 
+      {/* ⭐ LOADING OVERLAY */}
+      {loading && (
+        <div className="fixed inset-0 z-[9999] bg-black/70 flex flex-col items-center justify-center">
+          <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-white mt-4 text-lg">{loadingMsg}</p>
+        </div>
+      )}
+
       <h1 className="text-2xl font-bold text-center text-blue-900">
         Community App
       </h1>
@@ -154,7 +174,8 @@ export default function AuthPage() {
       {/* Google */}
       <button
         onClick={loginWithGoogle}
-        className="w-full bg-red-500 text-white p-3 rounded-lg font-semibold"
+        disabled={loading}
+        className="w-full bg-red-500 text-white p-3 rounded-lg font-semibold disabled:opacity-50"
       >
         Continue with Google
       </button>
@@ -187,7 +208,7 @@ export default function AuthPage() {
         type="email"
         placeholder="Email"
         value={email}
-        onChange={(e)=>setEmail(e.target.value)}
+        onChange={(e) => setEmail(e.target.value)}
         className="w-full border p-3 rounded-lg"
       />
 
@@ -196,7 +217,7 @@ export default function AuthPage() {
         type="password"
         placeholder="Password"
         value={password}
-        onChange={(e)=>setPassword(e.target.value)}
+        onChange={(e) => setPassword(e.target.value)}
         className="w-full border p-3 rounded-lg"
       />
 
@@ -214,14 +235,16 @@ export default function AuthPage() {
       {tab === "login" ? (
         <button
           onClick={login}
-          className="w-full bg-blue-600 text-white p-3 rounded-lg"
+          disabled={loading}
+          className="w-full bg-blue-600 text-white p-3 rounded-lg disabled:opacity-50"
         >
           Login
         </button>
       ) : (
         <button
           onClick={register}
-          className="w-full bg-green-600 text-white p-3 rounded-lg"
+          disabled={loading}
+          className="w-full bg-green-600 text-white p-3 rounded-lg disabled:opacity-50"
         >
           Create Account
         </button>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getAuth } from "firebase/auth";
-import { ref, get, update } from "firebase/database";
+import { ref, get } from "firebase/database";
+import { updateStudentMember } from "../services/rtdbService";
 import { db } from "../firebase";
 import { useNavigate } from "react-router-dom";
 
@@ -38,7 +39,7 @@ export default function StudentsPage() {
 
   const deleteStudent = async (id) => {
     // Only remove isStudent flag — don't delete the member
-    await update(ref(db, `families/${familyId}/members/${id}`), {
+    await updateStudentMember(familyId, id, {
       isStudent: false,
     });
     const updated = { ...students };

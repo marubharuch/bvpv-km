@@ -359,11 +359,9 @@ export default function About() {
 
       <div className="flex items-start justify-between mb-3">
         <div>
-          <p className="text-xs font-semibold" style={{ color: "#C9A84C" }}>
-            વિશા ઓશવાળ જૈન કેળવણી મંડળ
-          </p>
+        
           <h1 className="text-xl font-bold mt-0.5" style={{ color: "#F0D080" }}>
-            🏅 હોદ્દેદારો
+            🏅 હોદ્દેદારો-Honoured Dignitary
           </h1>
         </div>
 

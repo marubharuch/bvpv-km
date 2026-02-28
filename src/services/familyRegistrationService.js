@@ -1,6 +1,7 @@
 // src/services/familyRegistrationService.js
 
-import { ref, update, get, push } from "firebase/database";
+import { ref, get, push } from "firebase/database";
+import { batchWrite } from "./rtdbService";
 import { db } from "../firebase";
 
 // ─────────────────────────────────────────────
@@ -127,7 +128,7 @@ export async function submitFamilyRegistration({
   // ─────────────────────────────────────────────
   // SINGLE ATOMIC WRITE
   // ─────────────────────────────────────────────
-  await update(ref(db), updates);
+  await batchWrite(updates);
 
   return {
     familyId,

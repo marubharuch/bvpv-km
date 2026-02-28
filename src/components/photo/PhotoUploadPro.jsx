@@ -2,12 +2,11 @@ import { useRef, useState, useCallback } from "react";
 import Cropper from "react-easy-crop";
 import imageCompression from "browser-image-compression";
 
-import { ref, update } from "firebase/database";
-import { db } from "../../firebase";
+import { updateMember } from "../../services/rtdbService";
 import { uploadToCloudinary } from "../../services/cloudinaryService";
 import { getCroppedImg } from "../../utils/cropImage";
 
-export default function PhotoUploadPro({ memberId, photoUrl }) {
+export default function PhotoUploadPro({ memberId, photoURL }) {
   const fileInput = useRef();
 
   const [imageSrc, setImageSrc] = useState(null);
@@ -61,8 +60,8 @@ export default function PhotoUploadPro({ memberId, photoUrl }) {
     const url = await uploadToCloudinary(compressed);
 
     // 🔥 Save to Firebase
-    await update(ref(db, `members/${memberId}`), {
-      photoUrl: url,
+    await updateMember(memberId, {
+      photoURL: url,
       updatedAt: Date.now()
     });
 
@@ -78,8 +77,8 @@ export default function PhotoUploadPro({ memberId, photoUrl }) {
         onClick={openPicker}
         className="w-20 h-20 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center cursor-pointer border"
       >
-        {photoUrl ? (
-          <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+        {photoURL ? (
+          <img src={photoURL} alt="" className="w-full h-full object-cover" />
         ) : (
           "📷"
         )}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getAuth, signOut } from "firebase/auth";
-import { ref, get, update } from "firebase/database";
+import { ref, get } from "firebase/database";
+import { updateFamilyPins } from "../services/rtdbService";
 import { db } from "../firebase";
 
 export default function ProfilePage() {
@@ -31,11 +32,7 @@ export default function ProfilePage() {
   const regeneratePin = async () => {
     const newPin = Math.floor(1000 + Math.random() * 9000);
     // ✅ Also update the PIN index so lookups stay accurate
-    await update(ref(db, `families/${familyId}`), { familyPin: newPin });
-    await update(ref(db, `familyPins`), {
-      [family.familyPin]: null,   // remove old pin
-      [newPin]: familyId          // add new pin
-    });
+    await updateFamilyPins(familyId, newPin, family.familyPin);
     setFamily({ ...family, familyPin: newPin });
     alert("PIN updated");
   };

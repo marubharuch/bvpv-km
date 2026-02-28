@@ -1,5 +1,6 @@
 import { useState, useContext } from "react";
-import { ref, get, update } from "firebase/database";
+import { ref, get } from "firebase/database";
+import { updateFamilyMember, updateUser } from "../services/rtdbService";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -95,12 +96,12 @@ export default function UniversalOnboardingPage() {
       return;
     }
 
-    await update(ref(db, `families/${familyId}/members/${user.uid}`), {
+    await updateFamilyMember(familyId, user.uid, {
       name: user.displayName || user.email,
       joinedAt: Date.now()
     });
 
-    await update(ref(db, `users/${user.uid}`), {
+    await updateUser(user.uid, {
       familyId
     });
 
