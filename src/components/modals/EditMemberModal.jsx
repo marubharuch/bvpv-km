@@ -746,7 +746,7 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
           memberId, familyId,
           memberName: assembledName,
           mobile:     assembledMobile,
-          photoURL:   payload.photoURL || "",
+          photoURL:   payload.photoURL || member?.photoURL || "",
           post:       entry.post,
           orgName:    entry.name || "",
           updatedAt:  ts,
@@ -780,11 +780,11 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-40" style={{background:"rgba(0,0,0,0.5)"}} onClick={()=>onClose(false)} />
+      <div className="fixed inset-0 z-[199]" style={{background:"rgba(0,0,0,0.5)"}} onClick={()=>onClose(false)} />
 
       {/* Modal — slides from TOP */}
       <div
-        className="fixed left-0 right-0 top-0 z-50 flex flex-col rounded-b-3xl"
+        className="fixed left-0 right-0 top-0 z-[200] flex flex-col rounded-b-3xl"
         style={{
           background: "#FDF6EC",
           maxHeight: "92vh",
