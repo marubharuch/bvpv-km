@@ -724,7 +724,12 @@ export default function EditMemberModal({ open, mode="edit", member=null, family
         writes[`members/${memberId}`]                    = { ...payload, familyId, createdAt: ts };
         writes[`families/${familyId}/members/${memberId}`] = true;
       } else {
-        writes[`members/${memberId}`] = { ...member,...payload, updatedAt: ts };
+        writes[`members/${memberId}`] = {
+          ...member,
+          ...payload,
+          photoURL:  member?.photoURL || payload.photoURL || "",  // ✅ Bug 2: preserve existing photoURL
+          updatedAt: ts,
+        };
       }
 
       if (assembledMobile) {

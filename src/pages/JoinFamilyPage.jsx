@@ -72,10 +72,13 @@ export default function JoinFamilyPage() {
           email: user.email || "",
           gender: "",
           dob: "",
+          photoURL: user.photoURL || "",   // ✅ Bug 7: Google profile pic if available
+          honoraryOrgs: [],                  // ✅ Bug 7: empty default
           isHead: false,
           isSelf: true,
           isStudent: false,
           familyId,
+          createdAt: ts,                     // ✅ Bug 7: consistent with other member nodes
           joinedAt: ts,
         };
       }
@@ -90,11 +93,13 @@ export default function JoinFamilyPage() {
       updates[`users/${user.uid}/status`] = "active";
 
       // ── 6. Update mobileIndex if mobile is known ──
-      if (userData.mobile) {
-        updates[`mobileIndex/${userData.mobile}/memberIds/${memberId}`] = true;
-        updates[`mobileIndex/${userData.mobile}/familyIds/${familyId}`] = true;
-        updates[`mobileIndex/${userData.mobile}/isUser`] = true;
-        updates[`mobileIndex/${userData.mobile}/userUid`] = user.uid;
+      // ✅ Bug 6: normalize mobile before using as index key
+      const cleanMobile = (userData.mobile || "").replace(/\D/g, "").slice(-10);
+      if (cleanMobile) {
+        updates[`mobileIndex/${cleanMobile}/memberIds/${memberId}`] = true;
+        updates[`mobileIndex/${cleanMobile}/familyIds/${familyId}`] = true;
+        updates[`mobileIndex/${cleanMobile}/isUser`] = true;
+        updates[`mobileIndex/${cleanMobile}/userUid`] = user.uid;
       }
 
       // ── 7. Single atomic write ──

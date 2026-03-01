@@ -8,79 +8,90 @@ import {
 } from "firebase/auth";
 
 import { ref, get, set } from "firebase/database";
-import { writeUser, writeUserEmailIndex } from "../services/rtdbService";
 import { db } from "../firebase";
 import { useNavigate } from "react-router-dom";
 
 export default function AuthPage() {
-  const [tab, setTab] = useState("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState("");
+  const [tab, setTab]                 = useState("login");
+  const [email, setEmail]             = useState("");
+  const [password, setPassword]       = useState("");
+  const [countryCode, setCountryCode] = useState("+91");
+  const [mobile, setMobile]           = useState("");
+  const [loading, setLoading]         = useState(false);
+  const [loadingMsg, setLoadingMsg]   = useState("");
 
   const navigate = useNavigate();
-  const auth = getAuth();
+  const auth     = getAuth();
+
+  // Normalize mobile to full international format e.g. +919876543210
+  const normalizedMobile = () => {
+    const digits = mobile.trim().replace(/\D/g, "").slice(-10);
+    return digits ? `${countryCode}${digits}` : "";
+  };
+
+  // ─────────────────────────────────────────────
+  // After auth — decide where to go:
+  // Has familyId → /dashboard
+  // No familyId  → /onboarding (handles mobile check + family link)
+  // ─────────────────────────────────────────────
+  const afterAuth = async (uid) => {
+    const snap = await get(ref(db, `users/${uid}/familyId`));
+    if (snap.exists() && snap.val()) {
+      navigate("/dashboard", { replace: true });
+    } else {
+      navigate("/onboarding", { replace: true });
+    }
+  };
 
   // ─────────────────────────────────────────────
   // ⭐ Ensure user record exists in RTDB
   // ─────────────────────────────────────────────
-  const ensureUserRecord = async (user) => {
+  const ensureUserRecord = async (user, extraFields = {}) => {
     if (!user?.uid) return;
 
     const userRef = ref(db, `users/${user.uid}`);
-    const snap = await get(userRef);
+    const snap    = await get(userRef);
 
     if (!snap.exists()) {
+      // New user — write full node
       await set(userRef, {
-        email: user.email || null,
-        role: "guest",
-        familyId: null,
-        memberId: null,
-        status: "pendingRegistration",
-        createdAt: Date.now()
+        email:     user.email || null,
+        mobile:    extraFields.mobile || null,
+        role:      "guest",
+        familyId:  null,
+        memberId:  null,
+        status:    "pendingRegistration",
+        createdAt: Date.now(),
       });
 
+      // Email index
       if (user.email) {
         const emailKey = user.email
           .trim()
           .toLowerCase()
           .replace(/\./g, ",")
           .replace(/@/g, "_");
-
         await set(ref(db, `usersByEmail/${emailKey}`), user.uid);
       }
+
+      // mobileIndex — if mobile provided at registration
+      if (extraFields.mobile) {
+        const mob = extraFields.mobile.replace(/\D/g, "").slice(-10);
+        if (mob) {
+          await set(ref(db, `mobileIndex/${mob}/isUser`),  true);
+          await set(ref(db, `mobileIndex/${mob}/userUid`), user.uid);
+        }
+      }
+
+    } else if (extraFields.mobile && !snap.val()?.mobile) {
+      // Existing node but mobile not saved yet — update it
+      await set(ref(db, `users/${user.uid}/mobile`), extraFields.mobile);
+      const mob = extraFields.mobile.replace(/\D/g, "").slice(-10);
+      if (mob) {
+        await set(ref(db, `mobileIndex/${mob}/isUser`),  true);
+        await set(ref(db, `mobileIndex/${mob}/userUid`), user.uid);
+      }
     }
-  };
-
-  // ─────────────────────────────────────────────
-  // 🔗 AUTO CONNECT FAMILY IF EMAIL EXISTS
-  // ─────────────────────────────────────────────
-  const connectFamily = async (user) => {
-    if (!user?.email) return false;
-
-    const emailKey = user.email
-      .trim()
-      .toLowerCase()
-      .replace(/\./g, ",")
-      .replace(/@/g, "_");
-
-    const emailSnap = await get(ref(db, `users/${emailKey}`));
-
-    if (!emailSnap.exists()) return false;
-
-    const oldData = emailSnap.val();
-
-    await set(ref(db, `users/${user.uid}`), {
-      email: user.email,
-      familyId: oldData.familyId || null,
-      memberId: oldData.memberId || null,
-      role: oldData.role || "guest"
-    });
-
-    await set(ref(db, `usersByEmail/${emailKey}`), user.uid);
-
-    return true;
   };
 
   // ─────────────────────────────────────────────
@@ -91,15 +102,11 @@ export default function AuthPage() {
     setLoadingMsg("Signing in with Google...");
     try {
       const provider = new GoogleAuthProvider();
-      const res = await signInWithPopup(auth, provider);
+      const res      = await signInWithPopup(auth, provider);
 
       setLoadingMsg("Setting up your account...");
       await ensureUserRecord(res.user);
-
-      const mapped = await connectFamily(res.user);
-
-      if (mapped) navigate("/dashboard");
-      else navigate("/registration");
+      await afterAuth(res.user.uid);
 
     } catch {
       alert("Google login failed");
@@ -116,13 +123,9 @@ export default function AuthPage() {
     try {
       const res = await signInWithEmailAndPassword(auth, email, password);
 
-      setLoadingMsg("Setting up your account...");
+      setLoadingMsg("Checking your account...");
       await ensureUserRecord(res.user);
-
-      const mapped = await connectFamily(res.user);
-
-      if (mapped) navigate("/dashboard");
-      else navigate("/registration");
+      await afterAuth(res.user.uid);
 
     } catch {
       alert("Invalid email or password");
@@ -140,12 +143,8 @@ export default function AuthPage() {
       const res = await createUserWithEmailAndPassword(auth, email, password);
 
       setLoadingMsg("Setting up your account...");
-      await ensureUserRecord(res.user);
-
-      const mapped = await connectFamily(res.user);
-
-      if (mapped) navigate("/dashboard");
-      else navigate("/registration");
+      await ensureUserRecord(res.user, { mobile: normalizedMobile() });
+      await afterAuth(res.user.uid);
 
     } catch (e) {
       alert(e.message);
@@ -159,10 +158,10 @@ export default function AuthPage() {
   return (
     <div className="max-w-md mx-auto p-6 space-y-5">
 
-      {/* ⭐ LOADING OVERLAY */}
+      {/* LOADING OVERLAY */}
       {loading && (
         <div className="fixed inset-0 z-[9999] bg-black/70 flex flex-col items-center justify-center">
-          <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin" />
           <p className="text-white mt-4 text-lg">{loadingMsg}</p>
         </div>
       )}
@@ -184,21 +183,12 @@ export default function AuthPage() {
 
       {/* Tabs */}
       <div className="flex border rounded-lg overflow-hidden">
-        <button
-          onClick={() => setTab("login")}
-          className={`flex-1 p-2 ${
-            tab === "login" ? "bg-blue-600 text-white" : "bg-gray-100"
-          }`}
-        >
+        <button onClick={() => setTab("login")}
+          className={`flex-1 p-2 ${tab === "login" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>
           Login
         </button>
-
-        <button
-          onClick={() => setTab("register")}
-          className={`flex-1 p-2 ${
-            tab === "register" ? "bg-green-600 text-white" : "bg-gray-100"
-          }`}
-        >
+        <button onClick={() => setTab("register")}
+          className={`flex-1 p-2 ${tab === "register" ? "bg-green-600 text-white" : "bg-gray-100"}`}>
           Register
         </button>
       </div>
@@ -208,7 +198,7 @@ export default function AuthPage() {
         type="email"
         placeholder="Email"
         value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        onChange={e => setEmail(e.target.value)}
         className="w-full border p-3 rounded-lg"
       />
 
@@ -217,38 +207,61 @@ export default function AuthPage() {
         type="password"
         placeholder="Password"
         value={password}
-        onChange={(e) => setPassword(e.target.value)}
+        onChange={e => setPassword(e.target.value)}
         className="w-full border p-3 rounded-lg"
       />
 
+      {/* Mobile — only on Register tab */}
+      {tab === "register" && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Mobile Number (optional)</p>
+          <div className="flex gap-2">
+            <input
+              type="tel"
+              value={countryCode}
+              onChange={e => {
+                let v = e.target.value;
+                if (!v.startsWith("+")) v = "+" + v.replace(/\+/g, "");
+                setCountryCode(v);
+              }}
+              maxLength={5}
+              className="w-20 border p-3 rounded-lg text-center text-sm"
+              placeholder="+91"
+            />
+            <input
+              type="tel"
+              inputMode="numeric"
+              placeholder="Mobile number"
+              value={mobile}
+              onChange={e => setMobile(e.target.value.replace(/\D/g, ""))}
+              maxLength={10}
+              className="flex-1 border p-3 rounded-lg"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Forgot */}
       {tab === "login" && (
-        <p
-          onClick={() => navigate("/forgot-password")}
-          className="text-sm text-blue-600 text-right cursor-pointer"
-        >
+        <p onClick={() => navigate("/forgot-password")}
+          className="text-sm text-blue-600 text-right cursor-pointer">
           Forgot Password?
         </p>
       )}
 
       {/* Submit */}
       {tab === "login" ? (
-        <button
-          onClick={login}
-          disabled={loading}
-          className="w-full bg-blue-600 text-white p-3 rounded-lg disabled:opacity-50"
-        >
+        <button onClick={login} disabled={loading}
+          className="w-full bg-blue-600 text-white p-3 rounded-lg disabled:opacity-50">
           Login
         </button>
       ) : (
-        <button
-          onClick={register}
-          disabled={loading}
-          className="w-full bg-green-600 text-white p-3 rounded-lg disabled:opacity-50"
-        >
+        <button onClick={register} disabled={loading}
+          className="w-full bg-green-600 text-white p-3 rounded-lg disabled:opacity-50">
           Create Account
         </button>
       )}
+
     </div>
   );
 }

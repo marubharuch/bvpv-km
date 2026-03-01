@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { ref, get } from "firebase/database";
-import { db } from "../firebase"; // Adjust the import path as needed
+import { db } from "../firebase";
 import { useFamilyRegistration, STEPS } from "../hooks/useFamilyRegistration";
 import { CityPicker } from "../components/family/CityPicker";
 import { ContactCollector } from "../components/family/ContactCollector";
@@ -13,22 +13,21 @@ import { FamilyRegistrationSuccess } from "../components/family/FamilyRegistrati
 import { submitFamilyRegistration } from "../services/familyRegistrationService";
 
 const STEP_PCT = {
-  [STEPS.CITY]: 33,
+  [STEPS.CITY]:     33,
   [STEPS.CONTACTS]: 66,
-  [STEPS.REORDER]: 100,
+  [STEPS.REORDER]:  100,
 };
 
 export default function FamilyRegistrationFlow({ onDone }) {
   const navigate = useNavigate();
   const { user, isLoading } = useAuth();
 
-  const [submitting, setSubmitting] = useState(false);
-  const [submitErr, setSubmitErr] = useState(null);
-  const [result, setResult] = useState(null);
+  const [submitting, setSubmitting]   = useState(false);
+  const [submitErr, setSubmitErr]     = useState(null);
+  const [result, setResult]           = useState(null);
 
-  // ✅ RE-REGISTRATION CHECK
   const [checkingRegistration, setCheckingRegistration] = useState(true);
-  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
+  const [alreadyRegistered, setAlreadyRegistered]       = useState(false);
 
   const reg = useFamilyRegistration();
 
@@ -42,30 +41,25 @@ export default function FamilyRegistrationFlow({ onDone }) {
   // ✅ CHECK IF USER ALREADY HAS A FAMILY IN RTDB
   useEffect(() => {
     if (!user) return;
-    const userRef = ref(db, `users/${user.uid}`);
-    get(userRef)
+    get(ref(db, `users/${user.uid}`))
       .then((snap) => {
         if (snap.exists() && snap.val()?.familyId) {
           setAlreadyRegistered(true);
         }
       })
-      .catch((e) => {
-        console.error("Failed to check registration status:", e);
-      })
-      .finally(() => {
-        setCheckingRegistration(false);
-      });
+      .catch((e) => console.error("Failed to check registration status:", e))
+      .finally(() => setCheckingRegistration(false));
   }, [user]);
 
-  // Wait for both auth and registration check to complete
   if (isLoading || checkingRegistration) return <div>Loading...</div>;
+  if (!user) return null;
 
   async function handleSubmit(orderedContacts) {
     setSubmitting(true);
     setSubmitErr(null);
     try {
       const res = await submitFamilyRegistration({
-        city: reg.city,
+        city:     reg.city,
         contacts: orderedContacts,
         user,
       });
@@ -79,22 +73,22 @@ export default function FamilyRegistrationFlow({ onDone }) {
     }
   }
 
-  // ✅ FIX 1: Clear submitErr when going back so stale error doesn't persist
   function handleBack() {
     setSubmitErr(null);
     reg.goBack();
   }
 
-  // ✅ FIX 2: Close/cancel handler — exits the flow at any point
+  // ✅ Close → back to onboarding (not home) so user can try a different mobile
   function handleClose() {
     if (submitting) return;
-    onDone?.();
+    if (onDone) {
+      onDone();
+    } else {
+      navigate("/onboarding", { replace: true });
+    }
   }
 
-  // Don't render anything while redirecting
-  if (!user) return null;
-
-  // ✅ BLOCK RE-REGISTRATION
+  // ✅ BLOCK RE-REGISTRATION — redirect to dashboard
   if (alreadyRegistered) {
     return (
       <div className="fixed inset-0 top-16 z-50 flex items-start sm:items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -111,10 +105,10 @@ export default function FamilyRegistrationFlow({ onDone }) {
           </p>
 
           <button
-            onClick={onDone}
+            onClick={() => navigate("/dashboard", { replace: true })}
             className="w-full bg-green-600 text-white py-2 rounded-xl font-semibold"
           >
-            Visit Dashboard for views and updates
+            Go to Dashboard
           </button>
 
         </div>
@@ -127,7 +121,7 @@ export default function FamilyRegistrationFlow({ onDone }) {
 
       <div className="bg-white w-full max-w-md max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-2xl">
 
-        {/* Close button visible on all steps except success */}
+        {/* Close button — all steps except success */}
         {!result && (
           <div className="flex justify-end px-4 pt-4">
             <button
@@ -141,7 +135,7 @@ export default function FamilyRegistrationFlow({ onDone }) {
           </div>
         )}
 
-        {/* Progress bar — hidden on success */}
+        {/* Progress bar */}
         {!result && reg.step !== STEPS.SUCCESS && (
           <div className="h-1 bg-gray-100 rounded-t-3xl overflow-hidden">
             <div
@@ -151,7 +145,7 @@ export default function FamilyRegistrationFlow({ onDone }) {
           </div>
         )}
 
-        {/* SUCCESS SCREEN */}
+        {/* SUCCESS */}
         {result && (
           <FamilyRegistrationSuccess
             city={reg.city}

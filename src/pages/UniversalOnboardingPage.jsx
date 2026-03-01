@@ -96,15 +96,48 @@ export default function UniversalOnboardingPage() {
       return;
     }
 
-    await updateFamilyMember(familyId, user.uid, {
-      name: user.displayName || user.email,
-      joinedAt: Date.now()
-    });
+    // ✅ Bug 5: fetch actual memberId from users node, not user.uid
+    const { ref: fbRef, get: fbGet } = await import("firebase/database");
+    const { db: fbDb } = await import("../firebase");
+    const userSnap = await fbGet(fbRef(fbDb, `users/${user.uid}`));
+    const userData = userSnap.exists() ? userSnap.val() : {};
+    const memberId = userData.memberId || null;
 
-    await updateUser(user.uid, {
-      familyId
-    });
+    const ts = Date.now();
+    const { batchWrite: bw } = await import("../services/rtdbService");
+    const writes = {};
 
+    // If no memberId yet, create a member node
+    const { ref: fbRef2, push: fbPush } = await import("firebase/database");
+    let resolvedMemberId = memberId;
+    if (!resolvedMemberId) {
+      const { db: fbDb2 } = await import("../firebase");
+      const newRef = fbPush(fbRef2(fbDb2, "members"));
+      resolvedMemberId = newRef.key;
+      writes[`members/${resolvedMemberId}`] = {
+        name: user.displayName || user.email || "Member",
+        mobile: userData.mobile || "",
+        email: user.email || "",
+        gender: "",
+        dob: "",
+        photoURL: user.photoURL || "",
+        honoraryOrgs: [],
+        isHead: false,
+        isSelf: true,
+        isStudent: false,
+        familyId,
+        createdAt: ts,
+        joinedAt: ts,
+      };
+    }
+
+    writes[`families/${familyId}/members/${resolvedMemberId}`] = true;
+    writes[`users/${user.uid}/familyId`] = familyId;
+    writes[`users/${user.uid}/memberId`] = resolvedMemberId;
+    writes[`users/${user.uid}/role`] = "member";
+    writes[`users/${user.uid}/status`] = "active";
+
+    await bw(writes);
     navigate("/dashboard");
   };
 

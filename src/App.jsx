@@ -14,10 +14,11 @@ import LoginPage from "./pages/LoginPage";
 import RegistrationSuccess from "./pages/RegistrationSuccess";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ConnectorsPage from "./pages/ConnectorsPage";
-import UniversalOnboardingPage from "./pages/UniversalOnboardingPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
-import ContactOnboardingPage from "./pages/ContactOnboardingPage";
 import RegisterList from "./pages/RegisterList";
+import OnboardingPage from "./pages/OnboardingPage"
+
+// ✅ DELETED: UniversalOnboardingPage, ContactOnboardingPage
 
 function RegistrationWithNav() {
   const navigate = useNavigate();
@@ -32,21 +33,20 @@ export default function App() {
       <Route element={<AppLayout />}>
 
         {/* Public */}
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/registration" element={<RegistrationWithNav />} />
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/"               element={<Home />} />
+        <Route path="/about"          element={<About />} />
+        <Route path="/contact"        element={<Contact />} />
+        <Route path="/registration"   element={<RegistrationWithNav />} />
+        <Route path="/login"          element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/connectors" element={<ConnectorsPage />} />
-        <Route path="/leaderboard" element={<LeaderboardPage />} />
-        <Route path="/join" element={<JoinFamilyPage />} />
-        <Route path="/success" element={<RegistrationSuccess />} />
+        <Route path="/connectors"     element={<ConnectorsPage />} />
+        <Route path="/leaderboard"    element={<LeaderboardPage />} />
+        <Route path="/join"           element={<JoinFamilyPage />} />
+        <Route path="/success"        element={<RegistrationSuccess />} />
+        <Route path="/register-list"  element={<RegisterList />} />
 
-        {/* ✅ Added missing routes */}
-        <Route path="/onboarding" element={<UniversalOnboardingPage />} />
-        <Route path="/contact-onboarding" element={<ContactOnboardingPage />} />
-        <Route path="/register-list" element={<RegisterList />} />
+        {/* ✅ NEW unified onboarding — replaces /onboarding and /contact-onboarding */}
+        <Route path="/onboarding"     element={<OnboardingPage />} />
 
         {/* Private */}
         <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />

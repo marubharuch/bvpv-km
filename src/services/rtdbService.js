@@ -72,9 +72,29 @@ export async function updateFamily(familyId, data) {
   await updatePath(`families/${familyId}`, data);
 }
 
-/** Update a member inside a family's members map. */
+/**
+ * Update the family presence map entry for a member.
+ * NOTE: families/{familyId}/members/{memberId} only stores `true` (presence).
+ * To update actual member data, use updateMemberNode() instead.
+ */
+export async function updateFamilyMemberPresence(familyId, memberId) {
+  await updatePath(`families/${familyId}/members/${memberId}`, true);
+}
+
+/**
+ * @deprecated Use updateMemberNode() to update member data.
+ * Kept for backward compatibility — writes to families presence map only.
+ */
 export async function updateFamilyMember(familyId, memberId, data) {
-  await updatePath(`families/${familyId}/members/${memberId}`, data);
+  // ✅ Bug 9: this path is a presence map, not member data
+  // Writing data here has no effect on members/{memberId}
+  // Use updateMemberNode() for actual member field updates
+  await updatePath(`families/${familyId}/members/${memberId}`, true);
+}
+
+/** Update partial fields on the actual member document at members/{memberId}. */
+export async function updateMemberNode(memberId, data) {
+  await updatePath(`members/${memberId}`, data);
 }
 
 /** Write familyPin-related indexes. */

@@ -74,15 +74,42 @@ export default function ContactOnboardingPage() {
       return;
     }
 
-    await updateFamilyMember(familyId, user.uid, {
-      name: user.displayName || user.email,
-      joinedAt: Date.now()
-    });
+    // ✅ Bug 5: fetch actual memberId, do not use user.uid as memberId
+    const userSnap = await get(ref(db, `users/${user.uid}`));
+    const userData = userSnap.exists() ? userSnap.val() : {};
+    const ts = Date.now();
+    const { batchWrite } = await import("../services/rtdbService");
+    const { push } = await import("firebase/database");
+    const writes = {};
 
-    await updateUser(user.uid, {
-      familyId
-    });
+    let resolvedMemberId = userData.memberId || null;
+    if (!resolvedMemberId) {
+      const newRef = push(ref(db, "members"));
+      resolvedMemberId = newRef.key;
+      writes[`members/${resolvedMemberId}`] = {
+        name: user.displayName || user.email || "Member",
+        mobile: userData.mobile || "",
+        email: user.email || "",
+        gender: "",
+        dob: "",
+        photoURL: user.photoURL || "",
+        honoraryOrgs: [],
+        isHead: false,
+        isSelf: true,
+        isStudent: false,
+        familyId,
+        createdAt: ts,
+        joinedAt: ts,
+      };
+    }
 
+    writes[`families/${familyId}/members/${resolvedMemberId}`] = true;
+    writes[`users/${user.uid}/familyId`] = familyId;
+    writes[`users/${user.uid}/memberId`] = resolvedMemberId;
+    writes[`users/${user.uid}/role`] = "member";
+    writes[`users/${user.uid}/status`] = "active";
+
+    await batchWrite(writes);
     navigate("/dashboard");
   };
 

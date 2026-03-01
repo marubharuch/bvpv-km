@@ -61,24 +61,32 @@ export async function submitFamilyRegistration({
     if (index === selfIndex) selfMemberId = memberId;
 
     const mobile = (contact.phone || contact.mobile || "").trim();
+    // ✅ Bug 4: normalize mobile before indexing
+    const cleanMobile = mobile.replace(/\D/g, "").slice(-10);
 
-    // ⭐ MEMBER NODE (no city here)
+    // ✅ Bug 3 + Bug 8: added familyId, createdAt, photoURL, honoraryOrgs to member node
     updates[`members/${memberId}`] = {
       name: contact.name.trim(),
-      mobile: mobile,
+      mobile: cleanMobile,
       native: city,
       email: "",
       gender: "",
+      photoURL: "",
+      honoraryOrgs: [],
       isHead: index === 0,
       isSelf: contact.isSelf || false,
       isStudent: false,
+      familyId,
+      createdAt: ts,
     };
 
-    // ⭐ MOBILE INDEX UPDATE
-    updates[`mobileIndex/${mobile}/memberIds/${memberId}`] = true;
-    updates[`mobileIndex/${mobile}/familyIds/${familyId}`] = true;
-    updates[`mobileIndex/${mobile}/sources/familyRegistration`] = true;
-    updates[`mobileIndex/${mobile}/createdAt`] = ts;
+    // ✅ Bug 4: use cleanMobile as index key
+    if (cleanMobile) {
+      updates[`mobileIndex/${cleanMobile}/memberIds/${memberId}`] = true;
+      updates[`mobileIndex/${cleanMobile}/familyIds/${familyId}`] = true;
+      updates[`mobileIndex/${cleanMobile}/sources/familyRegistration`] = true;
+      updates[`mobileIndex/${cleanMobile}/createdAt`] = ts;
+    }
   });
 
   // ─────────────────────────────────────────────
@@ -100,7 +108,8 @@ export async function submitFamilyRegistration({
   // LINK USER → MEMBER
   // ─────────────────────────────────────────────
   if (user?.uid) {
-    const selfMobile = (contacts[selfIndex].phone || contacts[selfIndex].mobile || "").trim();
+    const selfMobileRaw = (contacts[selfIndex].phone || contacts[selfIndex].mobile || "").trim();
+    const selfMobile = selfMobileRaw.replace(/\D/g, "").slice(-10); // ✅ normalized
 
     updates[`users/${user.uid}/familyId`] = familyId;
     updates[`users/${user.uid}/memberId`] = selfMemberId;
@@ -108,9 +117,11 @@ export async function submitFamilyRegistration({
     updates[`users/${user.uid}/role`] = "member";
     updates[`users/${user.uid}/status`] = "active";
 
-    // ⭐ MOBILE INDEX — mark as registered user
-    updates[`mobileIndex/${selfMobile}/isUser`] = true;
-    updates[`mobileIndex/${selfMobile}/userUid`] = user.uid;
+    // ✅ MOBILE INDEX — mark as registered user (normalized key)
+    if (selfMobile) {
+      updates[`mobileIndex/${selfMobile}/isUser`] = true;
+      updates[`mobileIndex/${selfMobile}/userUid`] = user.uid;
+    }
   }
 
   // ─────────────────────────────────────────────
