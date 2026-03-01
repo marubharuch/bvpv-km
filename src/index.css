@@ -7,3 +7,29 @@
 /* Gujarati font — display=swap means text shows immediately in fallback font while this loads */
 
 .gu { font-family: 'Noto Sans Gujarati', sans-serif; }
+/* ── MOBILE INPUT FIXES ── */
+
+/* Prevent iOS Safari auto-zoom on input focus */
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="number"],
+input[type="password"],
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* Prevent horizontal scroll */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* Safe area for notch devices */
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

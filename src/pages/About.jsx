@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ref, get } from "firebase/database";
-import { db } from "../../firebase";
+import { db } from "../firebase";
 import { ChevronDown, MessageCircle, RefreshCw } from "lucide-react";
 import localforage from "localforage";
 

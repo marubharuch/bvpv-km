@@ -1,47 +1,29 @@
 import { useRef, useState, useCallback } from "react";
-import { updateMember, batchWrite } from "../services/rtdbService";
-import { ref, get } from "firebase/database";
-import { db } from "../firebase";
-
 import Cropper from "react-easy-crop";
 import imageCompression from "browser-image-compression";
-
 import { uploadToCloudinary } from "../services/cloudinaryService";
+import { updateMemberPhoto } from "../services/memberService";
 
-export default function ImageUploadBox({
-  familyId,
-  memberId,
-  photoURL
-}) {
+export default function ImageUploadBox({ familyId, memberId, photoURL,onPhotoUpdate  }) {
   const fileInput = useRef();
-
-  const [uploading, setUploading] = useState(false);
-
-  // ⭐ NEW STATES FOR EDITOR
-  const [imageSrc, setImageSrc] = useState(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);
+  const [uploading,         setUploading]         = useState(false);
+  const [imageSrc,          setImageSrc]          = useState(null);
+  const [crop,              setCrop]              = useState({ x: 0, y: 0 });
+  const [zoom,              setZoom]              = useState(1);
+  const [rotation,          setRotation]          = useState(0);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
   const handleClick = () => {
     if (photoURL) {
-      const replace = window.confirm("Replace existing photo?");
-      if (!replace) return;
+      if (!window.confirm("Replace existing photo?")) return;
     }
     fileInput.current.click();
   };
 
-  // 📂 SELECT FILE
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      alert("Only image allowed");
-      return;
-    }
-
+    if (!file.type.startsWith("image/")) { alert("Only image allowed"); return; }
     const reader = new FileReader();
     reader.onload = () => setImageSrc(reader.result);
     reader.readAsDataURL(file);
@@ -51,168 +33,88 @@ export default function ImageUploadBox({
     setCroppedAreaPixels(croppedPixels);
   }, []);
 
-  // 🚀 FINAL UPLOAD (YOUR ORIGINAL CODE INSIDE)
   const handleUpload = async () => {
     setUploading(true);
-
     try {
-      // Create canvas crop
       const canvas = document.createElement("canvas");
-      const image = new Image();
-      image.src = imageSrc;
+      const image  = new Image();
+      image.src    = imageSrc;
+      await new Promise(res => (image.onload = res));
 
-      await new Promise((res) => (image.onload = res));
-
-      canvas.width = croppedAreaPixels.width;
+      canvas.width  = croppedAreaPixels.width;
       canvas.height = croppedAreaPixels.height;
-
-      const ctx = canvas.getContext("2d");
+      const ctx     = canvas.getContext("2d");
 
       ctx.save();
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate((rotation * Math.PI) / 180);
       ctx.translate(-canvas.width / 2, -canvas.height / 2);
-
       ctx.drawImage(
         image,
-        croppedAreaPixels.x,
-        croppedAreaPixels.y,
-        croppedAreaPixels.width,
-        croppedAreaPixels.height,
-        0,
-        0,
-        croppedAreaPixels.width,
-        croppedAreaPixels.height
+        croppedAreaPixels.x, croppedAreaPixels.y,
+        croppedAreaPixels.width, croppedAreaPixels.height,
+        0, 0, croppedAreaPixels.width, croppedAreaPixels.height
       );
-
       ctx.restore();
 
-      const blob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, "image/jpeg", 0.9)
-      );
+      const blob       = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.9));
+      const compressed = await imageCompression(blob, { maxSizeMB: 0.4, maxWidthOrHeight: 800, useWebWorker: true });
+      const url        = await uploadToCloudinary(compressed);
 
-      // ⭐ Compress
-      const compressed = await imageCompression(blob, {
-        maxSizeMB: 0.4,
-        maxWidthOrHeight: 800,
-        useWebWorker: true
-      });
+      await updateMemberPhoto(memberId, url);
 
-      // ⭐ Upload to Cloudinary (UNCHANGED)
-      const url = await uploadToCloudinary(compressed);
-
-      // ⭐ Save URL to RTDB — also sync honoraryIndex entries for this member
-      const ts = Date.now();
-      const writes = {};
-
-      writes[`members/${memberId}/photoURL`] = url;
-      writes[`members/${memberId}/updatedAt`] = ts;
-
-      // Sync photoURL into any honoraryIndex entries for this member
-      const memberSnap = await get(ref(db, `members/${memberId}`));
-      const memberData = memberSnap.exists() ? memberSnap.val() : {};
-      (memberData.honoraryOrgs || []).forEach(entry => {
-        if (!entry.orgId || !entry.post) return;
-        writes[`honoraryIndex/${entry.orgId}/${memberId}/photoURL`] = url;
-        writes[`honoraryIndex/${entry.orgId}/${memberId}/updatedAt`] = ts;
-      });
-
-      await batchWrite(writes);
+      // ✅ notify parent immediately — no refresh needed
+      if (onPhotoUpdate) onPhotoUpdate(memberId, url);
 
       setImageSrc(null);
-
     } catch (err) {
       alert("Upload failed");
       console.error(err);
+    } finally {
+      setUploading(false);
     }
-
-    setUploading(false);
   };
 
   return (
     <div className="flex flex-col items-center">
-
-      {/* PHOTO BOX */}
       <div
         onClick={handleClick}
         className="w-14 h-14 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center cursor-pointer border-2 border-gray-300"
       >
-        {uploading ? (
-          <span className="text-xs">Uploading...</span>
-        ) : photoURL ? (
-          <img src={photoURL} alt="member" className="w-full h-full object-cover" />
-        ) : (
-          <span className="text-2xl text-gray-500">📷</span>
-        )}
+        {uploading
+          ? <span className="text-xs">...</span>
+          : photoURL
+            ? <img src={photoURL} alt="member" className="w-full h-full object-cover" />
+            : <span className="text-2xl text-gray-500">📷</span>
+        }
       </div>
 
-      {/* HIDDEN INPUT */}
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={handleFile}
-        hidden
-      />
+      <input ref={fileInput} type="file" accept="image/*" capture="environment" onChange={handleFile} hidden />
 
-      {/* ⭐ CROP EDITOR MODAL */}
       {imageSrc && (
-        <div className="fixed inset-0  z-[100]  bg-black/90 flex flex-col items-center justify-center">
-
+        <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center">
           <div className="relative w-80 h-80 bg-black">
             <Cropper
-              image={imageSrc}
-              crop={crop}
-              zoom={zoom}
-              rotation={rotation}
-              aspect={1}
-              cropShape="round"
-              onCropChange={setCrop}
-              onZoomChange={setZoom}
-              onRotationChange={setRotation}
-              onCropComplete={onCropComplete}
+              image={imageSrc} crop={crop} zoom={zoom} rotation={rotation}
+              aspect={1} cropShape="round"
+              onCropChange={setCrop} onZoomChange={setZoom}
+              onRotationChange={setRotation} onCropComplete={onCropComplete}
             />
           </div>
-
-          {/* CONTROLS */}
           <div className="flex gap-2 mt-4">
-
-            <button
-              onClick={() => setRotation(r => r - 90)}
-              className="bg-gray-700 text-white px-3 py-1 rounded"
-            >
-              Rotate
-            </button>
-
-            <button
-              onClick={handleUpload}
-              className="bg-blue-500 text-white px-4 py-2 rounded"
-            >
-              Upload
-            </button>
-
-            <button
-              onClick={() => setImageSrc(null)}
-              className="bg-red-500 text-white px-3 py-2 rounded"
-            >
-              Cancel
-            </button>
-
+            <button onClick={() => setRotation(r => r - 90)} className="bg-gray-700 text-white px-3 py-1 rounded">Rotate</button>
+            <button onClick={handleUpload} className="bg-blue-500 text-white px-4 py-2 rounded">Upload</button>
+            <button onClick={() => setImageSrc(null)} className="bg-red-500 text-white px-3 py-2 rounded">Cancel</button>
           </div>
         </div>
       )}
+
       {uploading && (
-  <div className="fixed inset-0 z-[9999] bg-black/70 flex flex-col items-center justify-center">
-    
-    {/* Spinner */}
-    <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
-
-    {/* Text */}
-    <p className="text-white mt-4">Uploading photo...</p>
-
-  </div>
-)}
+        <div className="fixed inset-0 z-[9999] bg-black/70 flex flex-col items-center justify-center">
+          <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin" />
+          <p className="text-white mt-4">Uploading photo...</p>
+        </div>
+      )}
     </div>
   );
 }

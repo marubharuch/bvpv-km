@@ -1,19 +1,25 @@
+/**
+ * ProfilePage.jsx
+ * ─────────────────────────────────────────────
+ * Refactored: uses familyService.updateFamilyPin()
+ * instead of direct Firebase writes.
+ */
+
 import { useEffect, useState } from "react";
 import { getAuth, signOut } from "firebase/auth";
 import { ref, get } from "firebase/database";
-import { updateFamilyPins } from "../services/rtdbService";
 import { db } from "../firebase";
+import { updateFamilyPin } from "../services/familyService";
 
 export default function ProfilePage() {
   const [familyId, setFamilyId] = useState(null);
-  const [family, setFamily] = useState(null);
+  const [family,   setFamily]   = useState(null);
 
   useEffect(() => {
     const loadFamily = async () => {
       const user = getAuth().currentUser;
       if (!user) return;
 
-      // ✅ FIX: Read familyId from /users/{uid} — no full families scan
       const uidSnap = await get(ref(db, `users/${user.uid}/familyId`));
       if (!uidSnap.exists()) return;
 
@@ -30,9 +36,8 @@ export default function ProfilePage() {
   if (!family) return <p className="p-4">Loading...</p>;
 
   const regeneratePin = async () => {
-    const newPin = Math.floor(1000 + Math.random() * 9000);
-    // ✅ Also update the PIN index so lookups stay accurate
-    await updateFamilyPins(familyId, newPin, family.familyPin);
+    const newPin = String(Math.floor(1000 + Math.random() * 9000));
+    await updateFamilyPin(familyId, newPin, String(family.familyPin));
     setFamily({ ...family, familyPin: newPin });
     alert("PIN updated");
   };
@@ -51,40 +56,30 @@ export default function ProfilePage() {
         <p className="text-sm text-gray-600">
           Family PIN: <span className="font-semibold">{family.familyPin}</span>
         </p>
-
-        <button
-          onClick={regeneratePin}
-          className="mt-2 text-xs text-blue-600 underline"
-        >
+        <button onClick={regeneratePin} className="mt-2 text-xs text-blue-600 underline">
           Regenerate PIN
         </button>
       </div>
 
       <div className="bg-white p-4 rounded shadow">
         <h3 className="font-semibold mb-2">Invite Family Member</h3>
-
         <p className="text-sm text-gray-600 mb-2">
           Share this link and PIN with family member to join.
         </p>
-
         <input
           readOnly
           value={`${window.location.origin}/join?familyId=${familyId}`}
           className="border w-full p-2 rounded text-sm mb-2"
         />
-
         <button
           onClick={() => {
-            navigator.clipboard.writeText(
-              `${window.location.origin}/join?familyId=${familyId}`
-            );
+            navigator.clipboard.writeText(`${window.location.origin}/join?familyId=${familyId}`);
             alert("Invite link copied");
           }}
           className="w-full bg-blue-600 text-white p-2 rounded mb-2"
         >
           Copy Invite Link
         </button>
-
         <button
           onClick={() => {
             const msg = `Join our family app.\nLink: ${window.location.origin}/join?familyId=${familyId}\nPIN: ${family.familyPin}`;
@@ -99,13 +94,10 @@ export default function ProfilePage() {
       {/* Family Contacts */}
       <div className="bg-white p-4 rounded shadow">
         <h3 className="font-semibold mb-2">Family Contacts</h3>
-
         {family.familyContacts?.map((c, i) => (
           <div key={i} className="border-b py-2">
             <p className="font-medium">{c.name}</p>
-            <p className="text-sm text-gray-600">
-              {c.phone} • {c.relation}
-            </p>
+            <p className="text-sm text-gray-600">{c.phone} • {c.relation}</p>
           </div>
         ))}
       </div>
@@ -113,7 +105,6 @@ export default function ProfilePage() {
       {/* Members */}
       <div className="bg-white p-4 rounded shadow">
         <h3 className="font-semibold mb-2">Joined Members</h3>
-
         {Object.values(family.members || {}).map((m, i) => (
           <div key={i} className="border-b py-2 text-sm">
             {m.email} ({m.role})
@@ -126,11 +117,7 @@ export default function ProfilePage() {
         <button className="w-full bg-gray-200 p-2 rounded">
           Edit Family Details
         </button>
-
-        <button
-          onClick={logout}
-          className="w-full bg-red-500 text-white p-2 rounded"
-        >
+        <button onClick={logout} className="w-full bg-red-500 text-white p-2 rounded">
           Logout
         </button>
       </div>
