@@ -129,46 +129,50 @@ function SkillChip({ label, selected, onToggle }) {
 
 // ── Tab components (same logic as original) ─────────────────────
 function MaritalStatus({ form, update }) {
+
   const getAge = (day, month, year) => {
     if (!day || !month || !year || String(year).length < 4) return null;
     const d = new Date(`${year}-${month}-${day}`);
     if (isNaN(d)) return null;
     return Math.floor((Date.now() - d) / (365.25 * 24 * 60 * 60 * 1000));
   };
-  const age   = getAge(form.dobDay, form.dobMonth, form.dobYear);
+
+  const age = getAge(form.dobDay, form.dobMonth, form.dobYear);
   if (age !== null && age < 20) return null;
-  const ms    = form.maritalStatus || "";
-  const step1 = ms === "Married" ? "Married" : ms === "Engaged" ? "Engaged" : ms !== "" ? "Unmarried" : "";
-  const btn   = active => active
-    ? { background: "#7B1C2E", borderColor: "#7B1C2E", color: "#F0D080" }
-    : { background: "#fff",    borderColor: "#f0e6e6", color: "#9B6060" };
+
+  const options = [
+    { value: "Single",    en: "Unmarried", gu: "અપરિણીત" },
+    { value: "Engaged",   en: "Engaged",   gu: "સગાઈ થઈ" },
+    { value: "Married",   en: "Married",   gu: "પરણેલા" },
+    { value: "Divorced",  en: "Divorced",  gu: "છૂટાછેડા" },
+    { value: "Widowed",   en: "Widowed",   gu: "વિધવા/વિધુર" }
+  ];
+
+  const btnStyle = active =>
+    active
+      ? { background: "#7B1C2E", borderColor: "#7B1C2E", color: "#F0D080" }
+      : { background: "#fff", borderColor: "#f0e6e6", color: "#9B6060" };
+
   return (
     <div className="space-y-3">
       <FieldLabel>Marital Status / વૈવાહિક સ્થિતિ</FieldLabel>
-      <div className="flex gap-2">
-        {[{ key:"Married",en:"Married",gu:"પરણેલા",emoji:"👫" },{ key:"Engaged",en:"Engaged",gu:"સગાઈ થઈ",emoji:"💍" },{ key:"Unmarried",en:"Unmarried",gu:"અપરિણીત",emoji:"🙍" }].map(opt => (
-          <button key={opt.key} type="button"
-            onClick={() => { update("maritalStatus", opt.key === "Unmarried" ? (ms==="Single"||ms==="Divorced"||ms==="Widowed" ? ms : "Single") : opt.key); update("remarriage",""); }}
-            className="flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all" style={btn(step1===opt.key)}>
-            <span className="block text-base">{opt.emoji}</span>
-            <span className="block">{opt.en}</span>
-            <span className="block text-xs opacity-80">{opt.gu}</span>
+
+      <div className="grid grid-cols-2 gap-3">
+
+        {options.map(opt => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => update("maritalStatus", opt.value)}
+            className="py-4 rounded-2xl text-sm font-semibold border-2 transition-all"
+            style={btnStyle(form.maritalStatus === opt.value)}
+          >
+            <div>{opt.en}</div>
+            <div className="text-xs opacity-75">{opt.gu}</div>
           </button>
         ))}
+
       </div>
-      {step1 === "Unmarried" && (
-        <div className="rounded-xl p-3 space-y-2" style={{ background: "#FDF0D0" }}>
-          <p className="text-xs font-semibold" style={{ color: "#7B5A00" }}>Unmarried Type</p>
-          <div className="flex gap-2">
-            {[{ value:"Single",en:"Single",gu:"કુંવારા" },{ value:"Divorced",en:"Divorced",gu:"છૂટાછેડા" },{ value:"Widowed",en:"Widowed",gu:"વિધવા/વિધુર" }].map(opt => (
-              <button key={opt.value} type="button" onClick={() => { update("maritalStatus",opt.value); update("remarriage",""); }}
-                className="flex-1 py-2 rounded-xl text-xs font-semibold border-2 transition-all" style={btn(ms===opt.value)}>
-                <span className="block">{opt.en}</span><span className="block text-xs opacity-75">{opt.gu}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -212,30 +216,66 @@ function TabBasic({ form, update, errors }) {
         </div>
       </div>
       <div>
-        <FieldLabel>Date of Birth</FieldLabel>
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <select value={form.dobDay||""} onChange={e=>update("dobDay",e.target.value)}
-              style={{fontSize:16,border:"2px solid #f0e6e6",background:"#fff",color:form.dobDay?"#3D0010":"#9B6060",appearance:"none",WebkitAppearance:"none"}}
-              className="w-full rounded-xl px-3 py-3 outline-none focus:border-[#C9A84C] transition-colors pr-7">
-              <option value="">Day</option>{DAYS.map(d=><option key={d} value={d}>{d}</option>)}
-            </select>
-            <ChevronRight size={12} className="absolute right-2 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" style={{color:"#9B6060"}} />
-          </div>
-          <div className="relative flex-1">
-            <select value={form.dobMonth||""} onChange={e=>update("dobMonth",e.target.value)}
-              style={{fontSize:16,border:"2px solid #f0e6e6",background:"#fff",color:form.dobMonth?"#3D0010":"#9B6060",appearance:"none",WebkitAppearance:"none"}}
-              className="w-full rounded-xl px-3 py-3 outline-none focus:border-[#C9A84C] transition-colors pr-7">
-              <option value="">Month</option>{MONTHS.map(m=><option key={m.v} value={m.v}>{m.l}</option>)}
-            </select>
-            <ChevronRight size={12} className="absolute right-2 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" style={{color:"#9B6060"}} />
-          </div>
-          <input type="tel" inputMode="numeric" value={form.dobYear||""}
-            onChange={e=>update("dobYear",e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="Year" maxLength={4}
-            style={{fontSize:16,border:"2px solid #f0e6e6",background:"#fff",color:"#3D0010"}}
-            className="flex-1 rounded-xl px-3 py-3 outline-none focus:border-[#C9A84C] transition-colors" />
-        </div>
-      </div>
+  <FieldLabel>Date of Birth</FieldLabel>
+
+  <div className="flex gap-3">
+
+    {/* DAY */}
+    <div className="relative w-24 min-w-0">
+      <select
+        value={form.dobDay || ""}
+        onChange={e => update("dobDay", e.target.value)}
+        className="w-full h-14 rounded-2xl px-4 pr-9 text-base outline-none
+                   border-2 border-[#f0e6e6] focus:border-[#C9A84C]
+                   appearance-none bg-white"
+        style={{ color: form.dobDay ? "#3D0010" : "#9B6060" }}
+      >
+        <option value="">Day</option>
+        {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+      </select>
+
+      <ChevronRight
+        size={16}
+        className="absolute right-3 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none"
+        style={{ color: "#9B6060" }}
+      />
+    </div>
+
+    {/* MONTH */}
+    <div className="relative flex-1 min-w-0">
+      <select
+        value={form.dobMonth || ""}
+        onChange={e => update("dobMonth", e.target.value)}
+        className="w-full h-14 rounded-2xl px-4 pr-9 text-base outline-none
+                   border-2 border-[#f0e6e6] focus:border-[#C9A84C]
+                   appearance-none bg-white"
+        style={{ color: form.dobMonth ? "#3D0010" : "#9B6060" }}
+      >
+        <option value="">Month</option>
+        {MONTHS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+      </select>
+
+      <ChevronRight
+        size={16}
+        className="absolute right-3 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none"
+        style={{ color: "#9B6060" }}
+      />
+    </div>
+
+    {/* YEAR */}
+    <input
+      type="tel"
+      inputMode="numeric"
+      value={form.dobYear || ""}
+      onChange={e => update("dobYear", e.target.value.replace(/\D/g, "").slice(0, 4))}
+      placeholder="Year"
+      className="w-28 h-14 rounded-2xl px-4 text-base outline-none
+                 border-2 border-[#f0e6e6] focus:border-[#C9A84C]"
+      style={{ color: "#3D0010" }}
+    />
+
+  </div>
+</div>
       <MaritalStatus form={form} update={update} />
       <BigToggle value={form.stayAway} onChange={() => update("stayAway",!form.stayAway)} labelOn="Stays away from home" labelOff="Stays at home" />
       {form.stayAway && <TextInput label="Which city?" value={form.stayCity} onChange={v=>update("stayCity",v)} placeholder="e.g. Ahmedabad, Surat" />}
@@ -382,6 +422,8 @@ function TabHonorary({ form, update }) {
 }
 
 function TabFinancial({ form, update }) {
+   if (!form.isStudent) return null;
+
   const ns=form.needsScholarship;
   const SUPPORT=[{key:"supportFees",label:"Fees",icon:"💳"},{key:"supportBooks",label:"Books",icon:"📚"},{key:"supportCoaching",label:"Coaching",icon:"🎯"},{key:"supportCounseling",label:"Counseling",icon:"🧠"}];
   return (

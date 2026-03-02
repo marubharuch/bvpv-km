@@ -1,279 +1,412 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 
-export default function Home() {
+const APP_URL = "https://bvpv-km.web.app/";
+const QR_URL  = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(APP_URL)}&color=4a0f1a&bgcolor=fff8ee&qzone=1`;
 
-  const goals = [
-    "સરકાર દ્વારા મળતી વિવિધ સહાયો વિદ્યાર્થીઓ સુધી પહોંચાડવી",
-    "કારકિર્દી વિષયક માર્ગદર્શન આપવું",
-    "જરૂરિયાતમંદ વિદ્યાર્થીઓને આર્થિક સહાય પ્રદાન કરવી",
-    "ઘરથી દૂર રહીને ભણતા વિદ્યાર્થીઓ ને નજીકના કોન્ટેક્ટ ઉપલબ્ધ કરાવવા",
-    "વિદ્યાર્થીઓના અભ્યાસ અને શોખ આધારે, સમાન ગ્રૂપ ના વિદ્યાર્થીઓ ને એકબીજા સાથે જોડવા અને આગળ વધારવા",
-  ];
+// ── Each "story card" is one full screen slide ─────────────────────
+const SLIDES = [
+  { id: "welcome" },
+  { id: "campaign" },
+  { id: "goals" },
+  { id: "competition" },
+  { id: "how" },
+  { id: "qr" },
+];
 
-  const steps = [
-    { n: 1, text: <>એપ ખોલો અને આપના પરિવારનું <strong>રજીસ્ટ્રેશન</strong> કરો</> },
-    { n: 2, text: <><strong>સ્પર્ધા પેજ</strong> પર જાઓ</> },
-    { n: 3, text: <><strong>"Add Contact From Phone"</strong> બટન ક્લિક કરો — ફોનના કોન્ટેક્ટ લિસ્ટ ખૂલશે</> },
-    { n: 4, text: <>સર્ચ કરી, <strong>સમાજના કોન્ટેક્ટ સિલેક્ટ</strong> કરો</> },
-    { n: 5, text: <><strong>"Done"</strong> ક્લિક કરો — કોન્ટેક્ટ એડ થઈ જશે. જો જરૂર હોય તો નામ સુધારો.</> },
-  ];
+// ── Slide content ──────────────────────────────────────────────────
 
-  const APP_URL = "https://bvpv-km.web.app/";
-  const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(APP_URL)}&color=4a0f1a&bgcolor=fff8ee&qzone=1`;
-
+function SlideWelcome({ onNext }) {
   return (
-    <>
-      {/* ── SCROLL PROGRESS BAR ── */}
-      <ScrollProgress />
+    <div className="flex flex-col justify-between h-full px-6 py-10"
+      style={{ background: "linear-gradient(160deg,#3d0a18 0%,#7b1c2e 60%,#9b2035 100%)" }}>
 
-      {/* ── PAGE ── */}
-      <div
-        className="gu py-5 px-4"
-        style={{
-          background: "linear-gradient(135deg,#fdf3e7 0%,#f5e6c8 40%,#fdf8ef 100%)",
-          // extra bottom padding so content clears the sticky footer + bottom navbar
-          paddingBottom: "96px",
-        }}
-      >
-        <div className="max-w-xl mx-auto">
+      {/* Top decoration */}
+      <div className="flex justify-center">
+        <div className="w-20 h-20 rounded-full flex items-center justify-center text-4xl"
+          style={{ background: "rgba(201,168,76,0.15)", border: "2px solid rgba(201,168,76,0.3)" }}>
+          🙏
+        </div>
+      </div>
 
-          {/* ── BRANCHES BAR (replaces removed header) ── */}
-          <div
-            className="rounded-t-2xl py-2.5 px-5 text-center text-sm font-semibold"
-            style={{ background: "linear-gradient(90deg,#8b6520,#c9973a,#8b6520)", color: "#4a0f1a", letterSpacing: 0.5 }}
-          >
-            📍 બોરસદ &nbsp;|&nbsp; વાલવોડ &nbsp;|&nbsp; પાદરા &nbsp;|&nbsp; વટાદરા
-          </div>
+      {/* Center text */}
+      <div className="text-center space-y-3">
+     {/*   <p className="text-xs tracking-widest font-semibold"
+          style={{ color: "rgba(240,201,107,0.55)", letterSpacing: "0.2em" }}>
+          ✦ &nbsp; વિશા ઓશવાળ જૈન &nbsp; ✦
+        </p>
+        <h1 className="text-3xl font-bold leading-tight" style={{ color: "#f0d080" }}>
+          કેળવણી મંડળ
+        </h1>
+        <p className="text-sm" style={{ color: "rgba(240,208,128,0.55)" }}>
+          બોરસદ · વાલવોડ · પાદરા · વટાદરા
+        </p>*/}
 
-          {/* ── BODY ── */}
-          <div
-            className="px-6 py-8 border-x rounded-b-2xl"
-            style={{ background: "#fdf8ef", borderColor: "#f0c96b" }}
-          >
+        <div className="pt-4">
+          <div className="inline-block rounded-2xl px-5 py-3"
+            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(201,151,58,0.3)" }}>
+            <p className="text-base font-bold" style={{ color: "#f0d080" }}>
+              📋 વિદ્યાર્થી ડેટા અભિયાન ૨૦૨૬
+            </p>
+  <p
+  className="text-sm leading-relaxed mb-6"
+  style={{ color: "rgba(255,255,255,0.85)" }}
+>
+  સમાજના સમગ્ર વિદ્યાર્થીઓના ડેટા કલેક્શનનું મહત્વપૂર્ણ અભિયાન શરૂ કરવામાં આવ્યું છે. 
+  કેળવણી મંડળ વિદ્યાર્થીઓની જરૂરિયાતોને સમજીને આવનારા સમયમાં ઉપયોગી અને માર્ગદર્શક કાર્યક્રમોનું આયોજન કરવા પ્રતિબદ્ધ છે. 
+  આ અભિયાનમાં આપનો સહયોગ અમૂલ્ય છે. 
+  ચાલો, મળીને આ પવિત્ર પ્રયત્નને સફળ બનાવીએ અને આપણા સમાજના ભવિષ્યને વધુ ઉજ્જવળ બનાવીએ.
 
-            {/* Section 1 */}
-            <Section icon="📋" title="વિદ્યાર્થી ડેટા કલેક્શન અભિયાન">
-              <p className="text-sm leading-relaxed" style={{ color: "#5a3a1a" }}>
-                સમાજ દ્વારા સમગ્ર સમાજના વિદ્યાર્થીઓના ડેટા કલેક્શનનું અભિયાન શરૂ કરાયું છે.
-                વિદ્યાર્થીઓના ડેટા કલેક્ટ કર્યા પછી, કેળવણી મંડળ વિદ્યાર્થીઓની જરૂરિયાત
-                સમજીને આગામી કાર્યક્રમોનું આયોજન કરવા માંગે છે.
-              </p>
-            </Section>
+  <br /><br />
+  <span style={{ fontWeight: "600", color: "#ffffff" }}>
+    — અશ્વિન શાહ (CA), માનદ મંત્રી
+  </span>
+</p>
 
-            {/* Section 2 */}
-            <Section icon="🎯" title="આ ડેટા કઈ રીતે ઉપયોગમાં આવશે?">
-              <ul className="space-y-0">
-                {goals.map((g, i) => (
-                  <li key={i} className="flex items-start gap-2.5 py-2 text-sm leading-relaxed"
-                    style={{ color: "#5a3a1a", borderBottom: i < goals.length - 1 ? "1px dashed rgba(201,151,58,0.3)" : "none" }}>
-                    <span className="mt-1 text-xs flex-shrink-0" style={{ color: "#c9973a" }}>◆</span>
-                    {g}
-                  </li>
-                ))}
-              </ul>
-            </Section>
 
-            {/* Section 3 */}
-            <Section icon="📅" title="મહત્ત્વની તારીખો">
-              <div className="flex gap-3 mt-1">
-                <DateCard label="ફોર્મ ઉપલબ્ધ" date="06 / 03 / 2026" note="રજીસ્ટ્રેશન શરૂ" />
-                <DateCard label="છેલ્લી તારીખ" date="31 / 03 / 2026" note="ડેટા ભરવાની અંતિમ" />
-              </div>
-              <HighlightBox className="mt-4">
-                ⚠️ <strong>વિનંતી:</strong> ૩૧ માર્ચ ૨૦૨૬ સુધીમાં દરેક વિદ્યાર્થી/પરિવાર
-                પોતાના ડેટા ભરી દે તેવી નમ્ર વિનંતી છે.
-              </HighlightBox>
-            </Section>
 
-            <p className="text-center my-5 text-xs tracking-widest" style={{ color: "#c9973a", opacity: 0.5 }}>◆ ◆ ◆</p>
-
-            {/* Section 4 */}
-            <Section icon="🏆" title="ઓસ્વાલ કનેક્ટર — સ્પર્ધા">
-              <div
-                className="rounded-2xl p-5 mt-2 relative overflow-hidden border-2"
-                style={{ background: "linear-gradient(135deg,#fff,#fef9f0)", borderColor: "#c9973a" }}
-              >
-                <span className="absolute right-4 top-4 text-5xl pointer-events-none select-none" style={{ opacity: 0.1 }}>🏆</span>
-                <p className="text-lg font-bold" style={{ color: "#7b1c2e" }}>🎉 ઓસ્વાલ કનેક્ટર</p>
-                <p className="text-xs font-semibold mt-0.5 mb-3" style={{ color: "#8b6520" }}>સમાજ માટે ખાસ મોબાઈલ સ્પર્ધા</p>
-                <p className="text-sm leading-relaxed" style={{ color: "#5a3a1a" }}>
-                  આ સ્પર્ધામાં ભાગ લેવો ખૂબ સરળ છે! એપ માં એકવાર આપના પરિવારનું રજીસ્ટ્રેશન
-                  કર્યા પછી, આપના ફોનમાં આપણા સમાજના જેટલા પણ કોન્ટેક્ટ હોય — તે સ્પર્ધા
-                  પેજ પર જઈ એડ કરવાના છે.
-                </p>
-                <div className="mt-3 rounded-xl px-4 py-3"
-                  style={{ background: "linear-gradient(90deg,#4a0f1a,#7b1c2e)" }}>
-                  <p className="text-sm font-semibold" style={{ color: "#f0c96b" }}>
-                    🥇 સૌથી વધારે કોન્ટેક્ટ અપલોડ કરનારા ટોચના 5 &nbsp;|&nbsp; સૌથી વધુ
-                    યુનિક કોન્ટેક્ટ અપલોડ કરનારા ટોચના 5
-                  </p>
-                  <p className="text-xs mt-1.5" style={{ color: "rgba(240,201,107,0.8)" }}>
-                    — ને <strong>ઓસ્વાલ કનેક્ટર એવોર્ડ</strong> આપવામાં આવશે 🎖️
-                  </p>
-                </div>
-              </div>
-            </Section>
-
-            {/* Section 5 */}
-            <Section icon="📱" title="કેવી રીતે ભાગ લેવો? (Android)">
-              <div className="mt-1">
-                {steps.map(({ n, text }, i) => (
-                  <div key={n} className="flex gap-3.5 py-2.5 text-sm leading-relaxed items-start"
-                    style={{ borderBottom: i < steps.length - 1 ? "1px dashed rgba(201,151,58,0.25)" : "none", color: "#5a3a1a" }}>
-                    <span
-                      className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mt-0.5"
-                      style={{ background: "#c9973a", color: "#4a0f1a" }}
-                    >{n}</span>
-                    <span>{text}</span>
-                  </div>
-                ))}
-              </div>
-            </Section>
-
-            {/* QR + Link */}
-            <div className="rounded-2xl overflow-hidden border-2 my-5" style={{ borderColor: "#c9973a" }}>
-              <div className="px-5 py-3 text-center"
-                style={{ background: "linear-gradient(90deg,#8b6520,#c9973a,#8b6520)" }}>
-                <p className="font-bold text-sm" style={{ color: "#4a0f1a" }}>
-                  📲 QR કોડ સ્કેન કરો અથવા લિંક ક્લિક કરો
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: "rgba(74,15,26,0.7)" }}>
-                  ૬ માર્ચ ૨૦૨૬ થી ઉપલબ્ધ
-                </p>
-              </div>
-              <div className="flex justify-center py-6" style={{ background: "#fff8ee" }}>
-                <div className="rounded-2xl p-3 border-2" style={{ borderColor: "#c9973a", background: "#fff8ee" }}>
-                  <img src={QR_URL} alt="QR Code" width={180} height={180} className="block" style={{ borderRadius: 8 }} />
-                </div>
-              </div>
-              <div className="px-5 pb-5 flex flex-col items-center gap-2" style={{ background: "#fff8ee" }}>
-                <a
-                  href={APP_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold"
-                  style={{ background: "linear-gradient(135deg,#4a0f1a,#7b1c2e)", color: "#f0c96b", boxShadow: "0 4px 14px rgba(74,15,26,0.35)" }}
-                >
-                  <span>🔗</span>
-                  <span>{APP_URL}</span>
-                </a>
-                <p className="text-xs text-center" style={{ color: "#8b6520" }}>
-                  QR કોડ સ્કેન કરીને અથવા ઉપરની લિંક ક્લિક કરીને ફોર્મ ભરી શકાશે
-                </p>
-              </div>
-            </div>
-
-            {/* Special Note */}
-            <HighlightBox className="text-center">
-              <span
-                className="inline-block text-white text-xs font-bold px-3 py-0.5 rounded-full mb-2"
-                style={{ background: "#e8572a" }}
-              >⚠️ ખાસ નોંધ</span>
-              <p className="text-sm font-semibold" style={{ color: "#7b1c2e" }}>
-                રજીસ્ટ્રેશન અને સ્પર્ધા <u>ફક્ત સમાજના સભ્યો</u> માટે છે.
-              </p>
-              <p className="text-xs mt-1" style={{ color: "#5a3a1a" }}>
-                આ સંદેશ સમાજના તમામ ગ્રૂપોમાં ફોરવર્ડ કરવામાં આવશે.
-              </p>
-            </HighlightBox>
-
+            <p className="text-xs mt-1" style={{ color: "rgba(240,208,128,0.6)" }}>
+              સ્વાઇપ કરો — આગળ વધો ↓
+            </p>
           </div>
         </div>
       </div>
 
-      {/* ── STICKY FOOTER — above bottom navbar (z-30 so navbar z-50 sits on top) ── */}
-      <div
-        className="fixed bottom-16 left-0 right-0 z-30 flex items-center justify-center gap-3 py-2 px-4"
-        style={{
-          background: "linear-gradient(135deg,#4a0f1a,#7b1c2e)",
-          borderTop: "1px solid rgba(201,151,58,0.5)",
-          boxShadow: "0 -2px 12px rgba(74,15,26,0.3)",
-        }}
-      >
-        <span style={{ color: "rgba(240,201,107,0.7)", fontSize: 11 }}>— કેળવણી મંડળ વતી —</span>
-        <span className="font-bold text-xs" style={{ color: "#f0c96b" }}>
-          ✍️ શ્રી અશ્વિનભાઈ  શાહ(CA)
-        </span>
-        <span style={{ color: "#c9973a", opacity: 0.6 }}>✦</span>
-        <span className="text-xs" style={{ color: "rgba(240,201,107,0.55)" }}>માનદ મંત્રી</span>
-         <a
-          href="https://wa.me/919375046358?text=નમસ્તે%2C%20%F0%9F%99%8F%0A%0Aમારો%20પ્રતિભાવ%20(Feedback)%3A%0A%0A"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0"
-          style={{ background: "#25D366", color: "#fff" }}
-        >
-          <span>💬</span> પ્રતિભાવ
-        </a>
-      </div>
-    </>
+      {/* Bottom CTA */}
+      <button onClick={onNext}
+        className="w-full py-4 rounded-2xl text-base font-bold flex items-center justify-center gap-2"
+        style={{ background: "rgba(201,168,76,0.2)", color: "#f0c96b", border: "1.5px solid rgba(201,168,76,0.4)" }}>
+        વધુ માહિતી &nbsp; ↓
+      </button>
+    </div>
   );
 }
 
-/* ── Scroll progress bar ── */
-function ScrollProgress() {
-  const [pct, setPct] = useState(0);
+function SlideCampaign({ onNext }) {
+  return (
+    <div className="flex flex-col justify-between h-full px-6 py-10"
+      style={{ background: "linear-gradient(160deg,#1a0a2e 0%,#2d1b69 100%)" }}>
 
-  if (typeof window !== "undefined") {
-    const onScroll = () => {
-      const el = document.documentElement;
-      const scrolled = el.scrollTop;
-      const total = el.scrollHeight - el.clientHeight;
-      setPct(total > 0 ? (scrolled / total) * 100 : 0);
-    };
-    // attach only once
-    if (!window.__homeScrollBound) {
-      window.addEventListener("scroll", onScroll, { passive: true });
-      window.__homeScrollBound = true;
-    }
-  }
+      <div>
+        <span className="inline-block text-xs font-bold px-3 py-1 rounded-full mb-4"
+          style={{ background: "rgba(201,168,76,0.2)", color: "#c9a84c" }}>
+          01 / 05
+        </span>
+        <h2 className="text-2xl font-bold mb-3 leading-snug" style={{ color: "#fff" }}>
+          📋
+        </h2>
+      
+
+        {/* Date cards */}
+        <div className="flex gap-3">
+          <div className="flex-1 rounded-2xl p-4 text-center"
+            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <p className="text-xs mb-1" style={{ color: "rgba(255,255,255,0.5)" }}>ફોર્મ ઉપલબ્ધ (Online)</p>
+            <p className="text-xl font-bold" style={{ color: "#c9a84c" }}>૦૬ માર્ચ</p>
+            <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>૨૦૨૬</p>
+          </div>
+          <div className="flex-1 rounded-2xl p-4 text-center"
+            style={{ background: "rgba(232,87,42,0.25)", border: "1px solid rgba(232,87,42,0.4)" }}>
+            <p className="text-xs mb-1" style={{ color: "rgba(255,150,100,0.8)" }}>છેલ્લી તારીખ</p>
+            <p className="text-xl font-bold" style={{ color: "#ff9060" }}>૩૧ માર્ચ</p>
+            <p className="text-xs mt-1" style={{ color: "rgba(255,150,100,0.5)" }}>⚠️ ડેડલાઈન</p>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={onNext}
+        className="w-full py-4 rounded-2xl text-sm font-bold"
+        style={{ background: "rgba(255,255,255,0.1)", color: "#fff", border: "1px solid rgba(255,255,255,0.15)" }}>
+        આગળ ↓
+      </button>
+    </div>
+  );
+}
+
+function SlideGoals({ onNext }) {
+  const goals = [
+    { icon: "🏛️", text: "સરકારી સહાયો વિદ્યાર્થીઓ સુધી પહોંચાડવી" },
+    { icon: "🎯", text: "કારકિર્દી વિષયક માર્ગદર્શન આપવું" },
+    { icon: "💰", text: "જરૂરિયાતમંદ વિદ્યાર્થીઓને આર્થિક સહાય" },
+    { icon: "📍", text: "દૂર ભણતા વિદ્યાર્થીઓ ને નજીકના કોન્ટેક્ટ" },
+    { icon: "🤝", text: "સમાન ગ્રૂપ ના વિદ્યાર્થીઓ ને જોડવા" },
+  ];
+
+  return (
+    <div className="flex flex-col justify-between h-full px-6 py-10"
+      style={{ background: "linear-gradient(160deg,#0a2e1a 0%,#1a5c35 100%)" }}>
+
+      <div>
+        <span className="inline-block text-xs font-bold px-3 py-1 rounded-full mb-4"
+          style={{ background: "rgba(52,211,153,0.15)", color: "#34d399" }}>
+          02 / 05
+        </span>
+        <h2 className="text-2xl font-bold mb-4 leading-snug" style={{ color: "#fff" }}>
+          🎯 ઉદ્દેશ્યો
+        </h2>
+
+        <div className="space-y-2">
+          {goals.map((g, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl"
+              style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <span className="text-xl flex-shrink-0">{g.icon}</span>
+              <p className="text-sm" style={{ color: "rgba(255,255,255,0.82)" }}>{g.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button onClick={onNext}
+        className="w-full py-4 rounded-2xl text-sm font-bold mt-4"
+        style={{ background: "rgba(52,211,153,0.15)", color: "#34d399", border: "1px solid rgba(52,211,153,0.3)" }}>
+        આગળ ↓
+      </button>
+    </div>
+  );
+}
+
+function SlideCompetition({ onNext }) {
+  return (
+    <div className="flex flex-col justify-between h-full px-6 py-10"
+      style={{ background: "linear-gradient(160deg,#2e1a00 0%,#7b4a00 60%,#c9730a 100%)" }}>
+
+      <div>
+        <span className="inline-block text-xs font-bold px-3 py-1 rounded-full mb-4"
+          style={{ background: "rgba(251,191,36,0.2)", color: "#fbbf24" }}>
+          03 / 05
+        </span>
+        <h2 className="text-2xl font-bold mb-2 leading-snug" style={{ color: "#fef3c7" }}>
+          🏆 ઓસ્વાલ કનેક્ટર
+        </h2>
+        <p className="text-xs font-semibold mb-4" style={{ color: "rgba(251,191,36,0.7)" }}>
+          સમાજ માટે ખાસ  સ્પર્ધા
+        </p>
+
+        <p className="text-sm leading-relaxed mb-5" style={{ color: "rgba(255,255,255,0.78)" }}>
+          પરિવારનું રજીસ્ટ્રેશન કર્યા પછી, ફોનમાં સમાજના જેટલા પણ
+          કોન્ટેક્ટ હોય — તે સ્પર્ધા પેજ પર એડ કરવાના છે.
+        </p>
+
+        {/* Prize boxes */}
+        <div className="space-y-2 mb-5">
+          {[
+            { icon: "🥇", label: "સૌથી વધારે કોન્ટેક્ટ — ટોચના 5" },
+            { icon: "🌟", label: "સૌથી વધુ યુનિક કોન્ટેક્ટ — ટોચના 5" },
+          ].map((p, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl"
+              style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(251,191,36,0.25)" }}>
+              <span className="text-2xl">{p.icon}</span>
+              <p className="text-sm font-semibold" style={{ color: "#fef3c7" }}>{p.label}</p>
+            </div>
+          ))}
+          <p className="text-center text-xs pt-1" style={{ color: "rgba(251,191,36,0.6)" }}>
+            ને ઓસ્વાલ કનેક્ટર એવોર્ડ 🎖️
+          </p>
+        </div>
+
+       
+      </div>
+
+      <button onClick={onNext}
+        className="w-full py-3 rounded-2xl text-sm font-bold mt-3"
+        style={{ background: "rgba(0,0,0,0.2)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}>
+        આગળ ↓
+      </button>
+    </div>
+  );
+}
+
+function SlideHow({ onNext }) {
+  const steps = [
+    "એપ ખોલો અને પરિવારનું રજીસ્ટ્રેશન કરો",
+    "સ્પર્ધા પેજ પર જાઓ",
+    '"Add Contact From Phone" ક્લિક કરો',
+    "સર્ચ કરી, સમાજના કોન્ટેક્ટ સિલેક્ટ કરો",
+    '"Done" ક્લિક કરો — કોન્ટેક્ટ એડ થઈ જશે',
+  ];
+
+  return (
+    <div className="flex flex-col justify-between h-full px-6 py-10"
+      style={{ background: "linear-gradient(160deg,#0f172a 0%,#1e3a5f 100%)" }}>
+
+      <div>
+        <span className="inline-block text-xs font-bold px-3 py-1 rounded-full mb-4"
+          style={{ background: "rgba(96,165,250,0.15)", color: "#60a5fa" }}>
+          04 / 05
+        </span>
+        <h2 className="text-2xl font-bold mb-4" style={{ color: "#fff" }}>
+          📱 કેવી રીતે ભાગ લેવો?
+        </h2>
+
+        <div className="space-y-2.5">
+          {steps.map((text, i) => (
+            <div key={i} className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold mt-0.5"
+                style={{ background: "rgba(96,165,250,0.2)", color: "#60a5fa", border: "1px solid rgba(96,165,250,0.3)" }}>
+                {i + 1}
+              </span>
+              <p className="text-sm leading-relaxed pt-1" style={{ color: "rgba(255,255,255,0.78)" }}>{text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+       <Link to="/connectors"
+          className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl text-sm font-bold"
+          style={{ background: "linear-gradient(135deg,#b45309,#d97706)", color: "#fef3c7", boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}>
+          સ્પર્ધામાં ભાગ લો →
+        </Link>
+
+      <button onClick={onNext}
+        className="w-full py-4 rounded-2xl text-sm font-bold mt-4"
+        style={{ background: "rgba(96,165,250,0.15)", color: "#60a5fa", border: "1px solid rgba(96,165,250,0.25)" }}>
+        આગળ ↓
+      </button>
+    </div>
+  );
+}
+
+function SlideQR() {
+  return (
+    <div className="flex flex-col justify-between h-full px-6 py-10"
+      style={{ background: "linear-gradient(160deg,#3d0a18 0%,#7b1c2e 100%)" }}>
+
+      <div>
+        <span className="inline-block text-xs font-bold px-3 py-1 rounded-full mb-4"
+          style={{ background: "rgba(201,168,76,0.2)", color: "#c9a84c" }}>
+          05 / 05
+        </span>
+        <h2 className="text-2xl font-bold mb-2" style={{ color: "#f0d080" }}>
+          📲 એપ ખોલો
+        </h2>
+        <p className="text-sm mb-6" style={{ color: "rgba(240,208,128,0.6)" }}>
+          QR સ્કેન કરો અથવા લિંક ટૅપ કરો
+        </p>
+
+        {/* QR */}
+        <div className="flex justify-center mb-5">
+          <div className="rounded-2xl p-4" style={{ background: "#fff8ee", border: "2px solid rgba(201,168,76,0.4)" }}>
+            <img src={QR_URL} alt="QR Code" width={160} height={160} style={{ borderRadius: 8, display: "block" }} />
+          </div>
+        </div>
+
+        {/* Link button */}
+        <a href={APP_URL} target="_blank" rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 w-full py-4 rounded-2xl text-sm font-bold mb-4"
+          style={{ background: "rgba(201,168,76,0.15)", color: "#f0c96b", border: "1.5px solid rgba(201,168,76,0.4)" }}>
+          🔗 {APP_URL}
+        </a>
+
+        {/* Note */}
+        <div className="rounded-xl px-4 py-3 text-center"
+          style={{ background: "rgba(0,0,0,0.2)", border: "1px solid rgba(232,87,42,0.3)" }}>
+          <p className="text-xs font-semibold" style={{ color: "rgba(255,150,100,0.9)" }}>
+            ⚠️ ફક્ત સમાજના સભ્યો માટે
+          </p>
+        </div>
+      </div>
+
+      {/* Register CTA */}
+      <Link to="/registration"
+        className="flex items-center justify-center gap-2 w-full py-4 rounded-2xl text-base font-bold"
+        style={{ background: "linear-gradient(135deg,#c9a84c,#f0d080)", color: "#4a0f1a", boxShadow: "0 6px 24px rgba(0,0,0,0.3)" }}>
+        🏠 પરિવાર રજીસ્ટ્રેશન કરો
+      </Link>
+    </div>
+  );
+}
+
+// ── Dot indicators ─────────────────────────────────────────────────
+function Dots({ total, current }) {
+  return (
+    <div className="flex gap-1.5 justify-center">
+      {Array.from({ length: total }).map((_, i) => (
+        <div key={i} style={{
+          width:      i === current ? 20 : 6,
+          height:     6,
+          borderRadius: 3,
+          background: i === current ? "#c9a84c" : "rgba(201,168,76,0.25)",
+          transition: "all 0.3s ease",
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// ── Main ───────────────────────────────────────────────────────────
+export default function Home() {
+  const [current, setCurrent] = useState(0);
+  const [animDir, setAnimDir]  = useState(1); // 1 = down, -1 = up
+  const [visible, setVisible]  = useState(true);
+  const touchStartY = useRef(null);
+  const total = SLIDES.length;
+
+  const goTo = (index, dir = 1) => {
+    if (index < 0 || index >= total) return;
+    setAnimDir(dir);
+    setVisible(false);
+    setTimeout(() => {
+      setCurrent(index);
+      setVisible(true);
+    }, 220);
+  };
+
+  const goNext = () => goTo(current + 1, 1);
+  const goPrev = () => goTo(current - 1, -1);
+
+  // Touch swipe support
+  const onTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
+  const onTouchEnd   = (e) => {
+    if (touchStartY.current === null) return;
+    const delta = touchStartY.current - e.changedTouches[0].clientY;
+    if (Math.abs(delta) > 40) delta > 0 ? goNext() : goPrev();
+    touchStartY.current = null;
+  };
+
+  const slideComponents = [
+    <SlideWelcome     onNext={goNext} />,
+    <SlideCampaign    onNext={goNext} />,
+    <SlideGoals       onNext={goNext} />,
+    <SlideCompetition onNext={goNext} />,
+    <SlideHow         onNext={goNext} />,
+    <SlideQR />,
+  ];
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-50 h-1"
-      style={{ background: "rgba(201,151,58,0.15)" }}
+      className="flex flex-col"
+      style={{ height: "calc(100vh - 112px)", overflow: "hidden", position: "relative" }}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
     >
-      <div
-        className="h-full transition-all duration-100"
-        style={{
-          width: `${pct}%`,
-          background: "linear-gradient(90deg,#c9973a,#f0c96b)",
-        }}
-      />
-    </div>
-  );
-}
-
-/* ── Sub-components ── */
-function Section({ icon, title, children }) {
-  return (
-    <div className="mb-7">
-      <div className="flex items-center gap-2.5 mb-3 pb-2" style={{ borderBottom: "2px solid #f0c96b" }}>
-        <span className="w-8 h-8 rounded-full flex items-center justify-center text-sm flex-shrink-0"
-          style={{ background: "linear-gradient(135deg,#7b1c2e,#4a0f1a)" }}>{icon}</span>
-        <span className="text-base font-bold" style={{ color: "#7b1c2e" }}>{title}</span>
+      {/* Slide area */}
+      <div style={{
+        flex: 1,
+        overflow: "hidden",
+        opacity:   visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : `translateY(${animDir * 18}px)`,
+        transition: "opacity 0.22s ease, transform 0.22s ease",
+      }}>
+        {slideComponents[current]}
       </div>
-      {children}
-    </div>
-  );
-}
 
-function DateCard({ label, date, note }) {
-  return (
-    <div className="flex-1 rounded-xl px-4 py-3.5 text-center"
-      style={{ background: "linear-gradient(135deg,#4a0f1a,#7b1c2e)" }}>
-      <p className="text-xs uppercase tracking-wider mb-1.5" style={{ color: "rgba(255,255,255,0.6)" }}>{label}</p>
-      <p className="text-lg font-bold" style={{ color: "#f0c96b" }}>{date}</p>
-      <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>{note}</p>
-    </div>
-  );
-}
+      {/* Bottom bar — dots + nav */}
+      <div className="flex items-center justify-between px-6 py-3 flex-shrink-0"
+        style={{ background: "#1a0a14", borderTop: "1px solid rgba(201,168,76,0.15)" }}>
 
-function HighlightBox({ children, className = "" }) {
-  return (
-    <div className={`rounded-xl px-4 py-4 ${className}`}
-      style={{ background: "linear-gradient(135deg,#fff8ee,#fff3e0)", border: "1px solid #c9973a", borderLeftColor: "#c9973a", borderLeftWidth: 4 }}>
-      <div className="text-sm leading-relaxed" style={{ color: "#2c1a0e" }}>{children}</div>
+        <button onClick={goPrev} disabled={current === 0}
+          className="w-10 h-10 rounded-full flex items-center justify-center text-lg disabled:opacity-20 transition-opacity"
+          style={{ background: "rgba(201,168,76,0.1)", color: "#c9a84c" }}>
+          ↑
+        </button>
+
+        <Dots total={total} current={current} />
+
+        <button onClick={goNext} disabled={current === total - 1}
+          className="w-10 h-10 rounded-full flex items-center justify-center text-lg disabled:opacity-20 transition-opacity"
+          style={{ background: "rgba(201,168,76,0.1)", color: "#c9a84c" }}>
+          ↓
+        </button>
+      </div>
     </div>
   );
 }
