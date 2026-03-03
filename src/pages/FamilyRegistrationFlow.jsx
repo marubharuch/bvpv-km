@@ -41,6 +41,20 @@ export default function FamilyRegistrationFlow({ onDone }) {
       .catch(e => console.error("Registration check failed:", e))
       .finally(() => setCheckingRegistration(false));
   }, [user]);
+  // Pre-seed the user's own contact as the first entry (only if no draft exists)
+useEffect(() => {
+  if (!user?.uid || reg.contacts.length > 0) return;
+
+  get(ref(db, `users/${user.uid}/mobile`))
+    .then(snap => {
+      const mobile = snap.val() || "";
+      const name   = user.displayName || "";
+      if (mobile || name) {
+        reg.addContacts([{ name, phone: mobile, isSelf: true }]);
+      }
+    })
+    .catch(() => {});
+}, [user?.uid, reg.contacts.length]);// eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading || checkingRegistration) return <div>Loading...</div>;
   if (!user) return null;

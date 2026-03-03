@@ -116,6 +116,13 @@ export async function linkUserToFamily({ uid, familyId, memberId, mobile, email,
     if (mob) {
       updates[`mobileIndex/${mob}/isUser`]  = true;
       updates[`mobileIndex/${mob}/userUid`] = uid;
+
+      // ✅ FIX 2: mark connector as joined so leaderboard qualifies count works
+      const connSnap = await get(ref(db, `connectors/${mob}`));
+      if (connSnap.exists()) {
+        updates[`connectors/${mob}/joinedUserId`] = uid;
+        updates[`connectors/${mob}/joinedAt`]     = ts;
+      }
     }
   }
 

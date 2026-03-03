@@ -1,193 +1,306 @@
-import { useState, useEffect } from "react";
-import { ref, get, query, orderByChild } from "firebase/database";
+/**
+ * LeaderboardPage.jsx — Tailwind v4
+ * Upload Award: myContacts per user (deduped) → registered before deadline
+ * Invite Award: invitedBy per user → registered before deadline
+ * Deadline: /config/registrationDeadline
+ */
+
+import { useState, useEffect, useContext, useCallback } from "react";
+import { ref, get } from "firebase/database";
 import { db } from "../firebase";
-import { Trophy, Medal, Award } from "lucide-react";
+import { AuthContext } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
+
+const medal   = (i) => ["🥇", "🥈", "🥉"][i] ?? `#${i + 1}`;
+const fmtDate = (ms) => ms
+  ? new Date(ms).toLocaleDateString("gu-IN", { day: "numeric", month: "short", year: "numeric" })
+  : "—";
 
 export default function LeaderboardPage() {
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { user } = useContext(AuthContext);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    const loadLeaderboard = async () => {
-      try {
-        setLoading(true);
+  const [tab,         setTab]         = useState("upload");
+  const [uploaders,   setUploaders]   = useState([]);
+  const [inviters,    setInviters]    = useState([]);
+  const [deadline,    setDeadline]    = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(null);
 
-        // ✅ FIX: Fetch connectors (needed for score calc — unavoidable)
-        const connectorsSnap = await get(ref(db, "connectors"));
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const dlSnap = await get(ref(db, "config/registrationDeadline"));
+      const dl     = dlSnap.exists() ? new Date(dlSnap.val()).getTime() : null;
+      setDeadline(dl);
 
-        if (!connectorsSnap.exists()) {
-          setLeaderboard([]);
-          setLoading(false);
-          return;
+      const connSnap = await get(ref(db, "connectors"));
+      if (!connSnap.exists()) { setLoading(false); return; }
+
+      const connData  = {};
+      const inviteMap = {};
+      const uids      = new Set();
+
+      connSnap.forEach(child => {
+        const d = child.val();
+        connData[child.key] = d;
+        if (d.invitedBy) {
+          uids.add(d.invitedBy);
+          if (!inviteMap[d.invitedBy]) inviteMap[d.invitedBy] = { total: 0, qualifies: 0 };
+          inviteMap[d.invitedBy].total += 1;
+          if (d.joinedUserId && (!dl || (d.joinedAt && d.joinedAt <= dl)))
+            inviteMap[d.invitedBy].qualifies += 1;
         }
+        if (d.uploadedBy) uids.add(d.uploadedBy);
+      });
 
-        // Group by uploadedBy and calculate scores
-        const userScores = {};
+      const uploadMap = {};
+      await Promise.all([...uids].map(async uid => {
+        try {
+          const mcSnap = await get(ref(db, `users/${uid}/myContacts`));
+          if (!mcSnap.exists()) return;
+          let total = 0, qualifies = 0;
+          mcSnap.forEach(child => {
+            const conn = connData[child.key];
+            total += 1;
+            if (conn?.joinedUserId && (!dl || (conn.joinedAt && conn.joinedAt <= dl))) qualifies += 1;
+          });
+          uploadMap[uid] = { total, qualifies };
+        } catch (_) {}
+      }));
 
-        connectorsSnap.forEach(child => {
-          const data = child.val();
-          const userId = data.uploadedBy;
-          if (!userId) return;
+      const allUids = new Set([...Object.keys(uploadMap), ...Object.keys(inviteMap)]);
+      const nameMap = Object.fromEntries(
+        await Promise.all([...allUids].map(async uid => {
+          try {
+            // ✅ FIX 3: userSchema has no profile.name — read memberId → members/{id}/name
+            const userSnap = await get(ref(db, `users/${uid}`));
+            const userData = userSnap.exists() ? userSnap.val() : {};
+            const memberId = userData.memberId;
+            if (memberId) {
+              const nameSnap = await get(ref(db, `members/${memberId}/name`));
+              if (nameSnap.exists()) return [uid, nameSnap.val()];
+            }
+            // fallback: use email prefix or UID slice
+            return [uid, userData.email?.split("@")[0] || uid.slice(0, 8)];
+          } catch { return [uid, uid.slice(0, 8)]; }
+        }))
+      );
 
-          if (!userScores[userId]) {
-            userScores[userId] = { userId, uploaded: 0, invited: 0, joined: 0, score: 0 };
-          }
+      const makeRows = map =>
+        Object.entries(map)
+          .map(([uid, { total, qualifies }]) => ({
+            uid, total, qualifies,
+            name: nameMap[uid] || uid.slice(0, 8),
+            isMe: uid === user?.uid,
+          }))
+          .sort((a, b) => b.qualifies - a.qualifies || b.total - a.total);
 
-          userScores[userId].uploaded++;
-          userScores[userId].score += 1;
+      setUploaders(makeRows(uploadMap));
+      setInviters(makeRows(inviteMap));
+      setLastRefresh(new Date());
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [user]);
 
-          if (data.invitedBy === userId) {
-            userScores[userId].invited++;
-            userScores[userId].score += 2;
-          }
+  useEffect(() => { loadData(); }, [loadData]);
 
-          if (data.joinedUserId) {
-            userScores[userId].joined++;
-            userScores[userId].score += 10;
-          }
-        });
-
-        // ✅ FIX: Only fetch /users/{uid}/name for each scorer — not all users
-        // Batch individual reads instead of get(ref(db, "users"))
-        const userIds = Object.keys(userScores);
-        await Promise.all(
-          userIds.map(async (uid) => {
-            const nameSnap = await get(ref(db, `users/${uid}/name`));
-            const emailSnap = await get(ref(db, `users/${uid}/email`));
-            userScores[uid].name = nameSnap.val() || "Unknown User";
-            userScores[uid].email = emailSnap.val() || "";
-          })
-        );
-
-        const sorted = Object.values(userScores).sort((a, b) => b.score - a.score);
-        setLeaderboard(sorted);
-        setLoading(false);
-      } catch (err) {
-        console.error("Error loading leaderboard:", err);
-        setError("Failed to load leaderboard. Please try again.");
-        setLoading(false);
-      }
-    };
-
-    loadLeaderboard();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="max-w-md mx-auto p-4 flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading leaderboard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="max-w-md mx-auto p-4">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-          <p className="text-red-600">{error}</p>
-          <button onClick={() => window.location.reload()} className="mt-2 text-blue-600 underline">
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const rows           = tab === "upload" ? uploaders : inviters;
+  const myRank         = rows.findIndex(r => r.isMe) + 1;
+  const myRow          = rows.find(r => r.isMe);
+  const totalContacts  = rows.reduce((s, r) => s + r.total,    0);
+  const totalQualifies = rows.reduce((s, r) => s + r.qualifies, 0);
+  const deadlinePassed = deadline && Date.now() > deadline;
 
   return (
-    <div className="max-w-md mx-auto p-4 pb-20">
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg shadow-lg p-6 mb-4">
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <Trophy size={32} />
-          <h1 className="text-2xl font-bold">Leaderboard</h1>
-        </div>
-        <p className="text-center text-blue-100 text-sm">🏆 Oswal Connectors Competition</p>
-      </div>
+    <div className="min-h-screen pb-16" style={{ background: "#080d1a", color: "#e2e8f0" }}>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-        <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-          <Award size={18} /> Scoring System
-        </h3>
-        <div className="text-sm space-y-1 text-gray-700">
-          <div className="flex justify-between"><span>Upload contact:</span><strong className="text-blue-600">+1 point</strong></div>
-          <div className="flex justify-between"><span>Send invite:</span><strong className="text-green-600">+2 points</strong></div>
-          <div className="flex justify-between"><span>Successful join:</span><strong className="text-purple-600">+10 points</strong></div>
-        </div>
-      </div>
-
-      {leaderboard.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center">
-          <Trophy size={48} className="mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-600">No participants yet</p>
-          <p className="text-sm text-gray-500 mt-2">Be the first to upload contacts!</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {leaderboard.map((user, index) => {
-            const isTop3 = index < 3;
-            const bgColor =
-              index === 0 ? "bg-gradient-to-r from-yellow-50 to-yellow-100 border-2 border-yellow-400" :
-              index === 1 ? "bg-gradient-to-r from-gray-50 to-gray-100 border-2 border-gray-400" :
-              index === 2 ? "bg-gradient-to-r from-orange-50 to-orange-100 border-2 border-orange-400" :
-              "bg-white border border-gray-200";
-
-            return (
-              <div key={user.userId} className={`${bgColor} rounded-lg shadow-md p-4`}>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-3 flex-1">
-                    <div className="flex-shrink-0">
-                      {index === 0 && <div className="text-3xl">🥇</div>}
-                      {index === 1 && <div className="text-3xl">🥈</div>}
-                      {index === 2 && <div className="text-3xl">🥉</div>}
-                      {index > 2 && (
-                        <div className={`w-10 h-10 rounded-full ${index < 10 ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-600"} flex items-center justify-center font-bold`}>
-                          {index + 1}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-gray-900 truncate">{user.name}</div>
-                      <div className="text-xs text-gray-600 mt-1">
-                        <span className="mr-2">📤 {user.uploaded}</span>
-                        <span className="mr-2">📨 {user.invited}</span>
-                        <span>✅ {user.joined}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0 ml-4">
-                    <div className={`text-2xl font-bold ${index === 0 ? "text-yellow-600" : index === 1 ? "text-gray-600" : index === 2 ? "text-orange-600" : "text-blue-600"}`}>
-                      {user.score}
-                    </div>
-                    <div className="text-xs text-gray-500">points</div>
-                  </div>
-                </div>
-                {isTop3 && (
-                  <div className="mt-3 pt-3 border-t border-gray-200 grid grid-cols-3 gap-2 text-center text-xs">
-                    <div><div className="text-gray-600">Uploaded</div><div className="font-semibold text-blue-600">{user.uploaded} × 1 = {user.uploaded}</div></div>
-                    <div><div className="text-gray-600">Invited</div><div className="font-semibold text-green-600">{user.invited} × 2 = {user.invited * 2}</div></div>
-                    <div><div className="text-gray-600">Joined</div><div className="font-semibold text-purple-600">{user.joined} × 10 = {user.joined * 10}</div></div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {leaderboard.length > 0 && (
-        <div className="mt-6 text-center text-sm text-gray-600">
-          Total Participants: <strong>{leaderboard.length}</strong>
-        </div>
-      )}
-
-      <div className="mt-6 text-center">
-        <button onClick={() => window.location.reload()} className="bg-blue-600 text-white px-6 py-2 rounded-lg shadow">
-          🔄 Refresh Rankings
+      {/* ── HEADER ── */}
+      <div style={{ background: "linear-gradient(160deg,#0f172a 0%,#1a2744 60%,#0f3460 100%)" }}
+        className="px-4 pt-4 pb-7">
+        <button onClick={() => navigate(-1)}
+          className="text-blue-300 text-sm font-bold px-3.5 py-1.5 rounded-lg border-0 cursor-pointer mb-4"
+          style={{ background: "rgba(255,255,255,0.08)" }}>
+          ← પાછળ
         </button>
+
+        <div className="max-w-lg mx-auto text-center">
+          <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-3"
+            style={{ background: "radial-gradient(circle,rgba(251,191,36,0.2),transparent 70%)", border: "2px solid rgba(251,191,36,0.35)", filter: "drop-shadow(0 0 12px rgba(251,191,36,0.3))" }}>
+            <span className="text-4xl">🏆</span>
+          </div>
+          <h1 className="text-4xl font-black text-white tracking-tight">Leaderboard</h1>
+          <p className="text-[10px] font-bold tracking-[4px] text-blue-300 mt-1 mb-4">OSWAL CONNECTORS</p>
+
+          {/* deadline chip */}
+          <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-xl mb-4 border"
+            style={{
+              background: "rgba(255,255,255,0.05)",
+              borderColor: deadlinePassed ? "#ef4444" : "#f59e0b"
+            }}>
+            <span>{deadlinePassed ? "🔒" : "⏳"}</span>
+            <div className="text-left">
+              <p className="text-[9px] font-black tracking-[1.5px] uppercase"
+                style={{ color: deadlinePassed ? "#ef4444" : "#f59e0b" }}>
+                {deadlinePassed ? "Registration Closed" : "Registration Deadline"}
+              </p>
+              <p className="text-sm font-black text-white">{deadline ? fmtDate(deadline) : "Admin set કરશે"}</p>
+            </div>
+          </div>
+
+          {/* summary pills */}
+          <div className="flex justify-center gap-2 flex-wrap">
+            {[
+              { label: "Participants", value: rows.length,      color: "#60a5fa" },
+              { label: tab === "upload" ? "Uploaded" : "Invited", value: totalContacts, color: "#a78bfa" },
+              { label: "Registered ✅", value: totalQualifies,  color: "#34d399" },
+            ].map(p => (
+              <div key={p.label}
+                className="px-3 py-2 rounded-xl text-center min-w-[76px] border"
+                style={{ background: "rgba(255,255,255,0.05)", borderColor: p.color }}>
+                <div className="text-lg font-black" style={{ color: p.color }}>{p.value}</div>
+                <div className="text-[9px] text-slate-400 font-semibold mt-0.5">{p.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* my rank card */}
+        {myRow && (
+          <div className="max-w-lg mx-auto mt-4 rounded-2xl px-4 py-3"
+            style={{ background: "rgba(251,191,36,0.1)", border: "1.5px solid rgba(251,191,36,0.35)" }}>
+            <p className="text-[9px] font-black tracking-[2px] text-amber-400">MY RANK</p>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="text-3xl font-black text-amber-400">#{myRank}</span>
+              <div className="flex-1">
+                <p className="font-black text-base text-white">{myRow.name}</p>
+                <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                  {tab === "upload" ? "📤" : "📲"} {myRow.total} &nbsp;·&nbsp; ✅ {myRow.qualifies} registered
+                </p>
+              </div>
+              {myRank <= 3 && <span className="text-3xl">{medal(myRank - 1)}</span>}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* ── TABS ── */}
+      <div className="sticky top-0 z-20 border-b border-slate-800"
+        style={{ background: "#0d1424" }}>
+        <div className="max-w-lg mx-auto flex">
+          {[
+            { key: "upload", icon: "📤", label: "Upload Award", sub: "Unique contacts" },
+            { key: "invite", icon: "📲", label: "Invite Award",  sub: "Invites sent"   },
+          ].map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 border-0 bg-transparent cursor-pointer transition-all border-b-[3px] -mb-px
+                ${tab === t.key ? "text-slate-100 border-blue-400" : "text-slate-500 border-transparent"}`}>
+              <span className="text-xl">{t.icon}</span>
+              <div className="text-left">
+                <div className="text-sm font-black">{t.label}</div>
+                <div className="text-[10px] opacity-50">{t.sub}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ranking note */}
+      <div className="max-w-lg mx-auto mt-3 mx-4 px-4 py-2.5 rounded-xl flex gap-2 text-xs font-semibold text-slate-500"
+        style={{ background: "rgba(52,211,153,0.05)", border: "1px solid rgba(52,211,153,0.12)" }}>
+        <span>ℹ️</span>
+        <span>Ranking = <strong className="text-emerald-400">deadline પહેલા register</strong> થયેલા contacts. Tie → total count.</span>
+      </div>
+
+      {/* ── TABLE ── */}
+      <div className="max-w-lg mx-auto px-3 mt-3">
+
+        {/* legend */}
+        <div className="flex items-center gap-1.5 px-2.5 pb-2.5 text-[10px] font-bold text-slate-600 uppercase tracking-wider border-b border-slate-800 mb-2">
+          <span className="w-9">  #</span>
+          <span className="flex-1">Name</span>
+          <span className="w-20 text-right">{tab === "upload" ? "Uploaded" : "Invited"}</span>
+          <span className="w-20 text-right">Registered</span>
+        </div>
+
+        {loading && (
+          <div className="flex flex-col items-center gap-3 py-14 text-slate-500 font-semibold">
+            <div className="w-8 h-8 rounded-full border-[3px] border-slate-700 border-t-blue-400 animate-spin" />
+            Loading…
+          </div>
+        )}
+
+        {!loading && rows.length === 0 && (
+          <div className="text-center py-14 text-slate-500 font-bold">
+            <div className="text-4xl mb-2">📭</div>
+            <div>કોઈ data નથી</div>
+          </div>
+        )}
+
+        {!loading && rows.map((row, i) => {
+          const pct      = row.total > 0 ? Math.round((row.qualifies / row.total) * 100) : 0;
+          const barColor = i === 0 ? "#fbbf24" : i === 1 ? "#94a3b8" : i === 2 ? "#f97316" : "#10b981";
+          return (
+            <div key={row.uid}
+              className="flex items-center gap-1.5 px-2.5 py-3 rounded-2xl mb-2 border transition-all"
+              style={{
+                background:   row.isMe ? "rgba(251,191,36,0.05)" : i < 3 ? "#0f172a" : "#111827",
+                borderColor:  row.isMe ? "#fbbf24" : i < 3 ? "#334155" : "#1e293b",
+                borderWidth:  row.isMe ? "1.5px" : "1px",
+                animationDelay: `${i * 40}ms`,
+              }}>
+
+              {/* rank */}
+              <div className="w-9 text-center shrink-0">
+                {i < 3
+                  ? <span className="text-2xl">{medal(i)}</span>
+                  : <span className="text-sm font-black text-slate-500">{i + 1}</span>}
+              </div>
+
+              {/* name + bar */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-1 overflow-hidden">
+                  <span className="text-sm font-black text-slate-100 truncate">{row.name}</span>
+                  {row.isMe && (
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded shrink-0"
+                      style={{ background: "#fbbf24", color: "#0a0f1e" }}>YOU</span>
+                  )}
+                </div>
+                <div className="h-1 rounded-full overflow-hidden mb-1" style={{ background: "#1e293b" }}>
+                  <div className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%`, background: barColor, minWidth: 2 }} />
+                </div>
+                <span className="text-[10px] text-slate-600 font-semibold">{pct}% registered</span>
+              </div>
+
+              {/* total */}
+              <div className="w-20 text-right shrink-0">
+                <span className="text-base font-black text-slate-400">{row.total}</span>
+              </div>
+
+              {/* qualifies — THE winning metric */}
+              <div className="w-20 text-right shrink-0">
+                <span className="inline-block px-2 py-1 rounded-lg text-sm font-black"
+                  style={{
+                    background: row.qualifies > 0 ? "rgba(52,211,153,0.15)" : "rgba(71,85,105,0.2)",
+                    color:      row.qualifies > 0 ? "#34d399"                : "#475569",
+                    border:     row.qualifies > 0 ? "1px solid rgba(52,211,153,0.3)" : "none",
+                  }}>
+                  ✅ {row.qualifies}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {lastRefresh && (
+        <div className="text-center text-[11px] text-slate-600 font-semibold py-4">
+          Updated: {lastRefresh.toLocaleTimeString()}
+          &nbsp;·&nbsp;
+          <span className="text-blue-400 cursor-pointer font-bold" onClick={loadData}>Refresh ↻</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,9 @@
 /**
- * ConnectorsPage.jsx
- * Uses batchWrite / updatePath from rtdbService + AuthContext + useNavigate.
- * Rich UI/logic merged from ContestPage.
+ * ConnectorsPage.jsx  — Tailwind v4
+ * Rules:
+ *  - Every user gets upload credit via myContacts (phone = key → self-dedup)
+ *  - Invite list = ALL unregistered contacts (anyone's uploads)
+ *  - Invite 48hr; after expiry any user can re-invite
  */
 
 import { useState, useEffect, useContext } from "react";
@@ -11,17 +13,15 @@ import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
-// ── Helpers ────────────────────────────────────────────────────
 function normalizePhone(p) {
   p = p.replace(/[\s\-().+]/g, "");
   if (p.startsWith("91") && p.length === 12) p = p.slice(2);
   return p;
 }
 function isValidPhone(p) { return /^[6-9]\d{9}$/.test(p); }
-function isValidName(n) { return n.trim().split(/\s+/).length >= 2; }
-function uid() { return Math.random().toString(36).slice(2, 10); }
+function isValidName(n)  { return n.trim().split(/\s+/).length >= 2; }
+function uid()           { return Math.random().toString(36).slice(2, 10); }
 
-// ── Gujarat Cities ─────────────────────────────────────────────
 const CITIES = [
   "Ahmedabad","Surat","Vadodara","Rajkot","Bhavnagar","Jamnagar",
   "Gandhinagar","Anand","Nadiad","Mehsana","Palanpur","Patan",
@@ -33,46 +33,37 @@ const CITIES = [
 export default function ConnectorsPage() {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
-
   const [tab, setTab] = useState("add");
 
-  // ── Part 1 state ───────────────────────────────────────────
-  const [picked, setPicked] = useState([]);
-  const [cityTarget, setCityTarget] = useState(null);
-  const [citySearch, setCitySearch] = useState("");
-  const [selected, setSelected] = useState({});
-  const [submitting, setSubmitting] = useState(false);
-  const [submitDone, setSubmitDone] = useState(false);
-
-  // ── Part 2 state ───────────────────────────────────────────
-  const [inviteList, setInviteList] = useState([]);
+  const [picked,        setPicked]        = useState([]);
+  const [cityTarget,    setCityTarget]    = useState(null);
+  const [citySearch,    setCitySearch]    = useState("");
+  const [selected,      setSelected]      = useState({});
+  const [submitting,    setSubmitting]    = useState(false);
+  const [submitDone,    setSubmitDone]    = useState(false);
+  const [inviteList,    setInviteList]    = useState([]);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteSending, setInviteSending] = useState(null);
-
-  // ── Stats ──────────────────────────────────────────────────
-  const [stats, setStats] = useState({ uploaded: 0, invited: 0, joined: 0 });
-
-  useEffect(() => {
-    if (!user?.uid) return;
-    loadStats();
-  }, [user]);
+  const [stats,         setStats]         = useState({ uploaded: 0, invited: 0, joined: 0 });
+const [showRules, setShowRules] = useState(false);
+  useEffect(() => { if (user?.uid) loadStats(); }, [user]);
 
   async function loadStats() {
     try {
-      const snap = await get(ref(db, "connectors"));
-      if (!snap.exists()) return;
-      const data = [];
-      snap.forEach(child => data.push({ id: child.key, ...child.val() }));
-      const my = data.filter(c => c.uploadedBy === user.uid);
-      setStats({
-        uploaded: my.length,
-        invited:  my.filter(c => c.invitedBy === user.uid).length,
-        joined:   my.filter(c => c.joinedUserId).length,
-      });
+      const mcSnap = await get(ref(db, `users/${user.uid}/myContacts`));
+      const uploaded = mcSnap.exists() ? Object.keys(mcSnap.val()).length : 0;
+      const connSnap = await get(ref(db, "connectors"));
+      let invited = 0, joined = 0;
+      if (connSnap.exists()) {
+        connSnap.forEach(child => {
+          const d = child.val();
+          if (d.invitedBy === user.uid) { invited++; if (d.joinedUserId) joined++; }
+        });
+      }
+      setStats({ uploaded, invited, joined });
     } catch (_) {}
   }
 
-  // ── Contact Picker ─────────────────────────────────────────
   async function pickContacts() {
     if (!("contacts" in navigator) || !("ContactsManager" in window)) {
       alert("આ device Contact Picker support કરતું નથી. Chrome Mobile વાપરો.");
@@ -82,290 +73,235 @@ export default function ConnectorsPage() {
       const contacts = await navigator.contacts.select(["name", "tel"], { multiple: true });
       const mapped = contacts
         .filter(c => c.tel?.length)
-        .map(c => ({
-          id: uid(),
-          name: c.name?.[0] || "",
-          phone: normalizePhone(c.tel[0]),
-          city: "",
-        }))
+        .map(c => ({ id: uid(), name: c.name?.[0] || "", phone: normalizePhone(c.tel[0]), city: "" }))
         .filter(c => isValidPhone(c.phone));
       setPicked(prev => {
         const existing = new Set(prev.map(p => p.phone));
         return [...prev, ...mapped.filter(m => !existing.has(m.phone))];
       });
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) { console.error(e); }
   }
 
-  function updateName(id, val) {
-    setPicked(prev => prev.map(p => p.id === id ? { ...p, name: val } : p));
-  }
-
+  function updateName(id, val) { setPicked(prev => prev.map(p => p.id === id ? { ...p, name: val } : p)); }
   function removeContact(id) {
     setPicked(prev => prev.filter(p => p.id !== id));
     setSelected(prev => { const s = { ...prev }; delete s[id]; return s; });
   }
-
-  // ── City Popup ─────────────────────────────────────────────
   function openCityPopup(id) { setCityTarget(id); setCitySearch(""); }
   function selectCity(city) {
     setPicked(prev => prev.map(p => p.id === cityTarget ? { ...p, city } : p));
     setCityTarget(null);
   }
-  const filteredCities = CITIES.filter(c =>
-    c.toLowerCase().includes(citySearch.toLowerCase())
-  );
-
-  // ── Select / Submit ────────────────────────────────────────
-  const validContacts = picked.filter(p => isValidName(p.name) && p.city);
-
-  function toggleSelect(id) {
-    setSelected(prev => ({ ...prev, [id]: !prev[id] }));
-  }
+  const filteredCities = CITIES.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
+  const validContacts    = picked.filter(p => isValidName(p.name) && p.city);
+  const selectedContacts = validContacts.filter(p => selected[p.id]);
+  function toggleSelect(id) { setSelected(prev => ({ ...prev, [id]: !prev[id] })); }
   function selectAll() {
     const sel = {};
     validContacts.forEach(p => (sel[p.id] = true));
     setSelected(sel);
   }
 
-  const selectedContacts = validContacts.filter(p => selected[p.id]);
-
   async function handleSubmit() {
     if (!selectedContacts.length || !user?.uid) return;
     setSubmitting(true);
     const now = Date.now();
-
     try {
-      const indexSnap = await get(ref(db, "mobile_index"));
-      const mobileIndex = indexSnap.exists() ? indexSnap.val() : {};
-
+      const [mcSnap, connSnap] = await Promise.all([
+        get(ref(db, `users/${user.uid}/myContacts`)),
+        get(ref(db, "connectors")),
+      ]);
+      const myContacts   = mcSnap.exists()  ? mcSnap.val()  : {};
+      const existingConn = connSnap.exists() ? connSnap.val() : {};
       const updates = {};
-      let newCount = 0;
 
       for (const c of selectedContacts) {
+        if (myContacts[c.phone]) continue; // self-duplicate → skip
         updates[`users/${user.uid}/myContacts/${c.phone}`] = {
-          name: c.name.trim(),
-          phone: c.phone,
-          city: c.city,
-          addedAt: new Date().toISOString(),
+          name: c.name.trim(), phone: c.phone, city: c.city, addedAt: new Date().toISOString(),
         };
+        const existing = existingConn[c.phone];
         updates[`connectors/${c.phone}`] = {
-          name:        c.name.trim(),
-          mobile:      c.phone,
-          city:        c.city,
-          uploadedBy:  user.uid,
-          uploadedAt:  now,
-          creditUntil: now + 7 * 24 * 60 * 60 * 1000,
+          name: c.name.trim(), mobile: c.phone, city: c.city,
+          uploadedAt:  existing?.uploadedAt  || now,
+          uploadedBy:  existing?.uploadedBy  || user.uid,   // ✅ FIX 1: credit the uploader
         };
-        if (!mobileIndex[c.phone]) {
+        if (!existing) {
           updates[`mobile_index/${c.phone}`] = {
-            name:     c.name.trim(),
-            phone:    c.phone,
-            city:     c.city,
-            addedBy:  user.uid,
-            addedAt:  new Date().toISOString(),
-            memberId: null,
-            userId:   null,
+            name: c.name.trim(), phone: c.phone, city: c.city,
+            addedBy: user.uid, addedAt: new Date().toISOString(), memberId: null, userId: null,
           };
-          newCount++;
         }
       }
 
-      await batchWrite(updates);
-
-      if (newCount > 0) {
-        const statsRef = ref(db, `contest_contributions/${user.uid}`);
-        const statsSnap = await get(statsRef);
-        const existing = statsSnap.exists() ? statsSnap.val() : {};
-        await set(statsRef, {
-          ...existing,
-          contactsAdded: (existing.contactsAdded || 0) + newCount,
-          lastActivity: new Date().toISOString(),
-        });
-        setStats(prev => ({ ...prev, uploaded: prev.uploaded + newCount }));
+      if (Object.keys(updates).length === 0) {
+        alert("Selected contacts already uploaded by you before.");
+        setSubmitting(false);
+        return;
       }
-
-      setPicked([]);
-      setSelected({});
+      await batchWrite(updates);
+      await loadStats();
+      setPicked([]); setSelected({});
       setSubmitDone(true);
       setTimeout(() => setSubmitDone(false), 3000);
-    } catch (e) {
-      console.error(e);
-      alert("Error: " + e.message);
-    }
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
     setSubmitting(false);
   }
 
-  // ── Load Invite List ───────────────────────────────────────
   async function loadInviteList() {
     setInviteLoading(true);
     try {
-      const snap = await get(ref(db, "mobile_index"));
+      const snap = await get(ref(db, "connectors"));
       if (!snap.exists()) { setInviteList([]); setInviteLoading(false); return; }
       const now = Date.now();
       const list = [];
       snap.forEach(child => {
         const d = child.val();
-        const noMember = !d.memberId && !d.familyId;
-        const noLiveInvite = !d.invite || d.invite.expiresAt < now;
-        if (noMember && noLiveInvite) {
-          list.push({ phone: child.key, id: child.key, ...d });
-        }
+        if (!d.joinedUserId && (!d.invite || d.invite.expiresAt < now))
+          list.push({ phone: child.key, ...d });
       });
       setInviteList(list);
     } catch (e) { console.error(e); }
     setInviteLoading(false);
   }
 
-  useEffect(() => {
-    if (tab === "invite") loadInviteList();
-  }, [tab]);
+  useEffect(() => { if (tab === "invite") loadInviteList(); }, [tab]);
 
-  // ── Send Invite ────────────────────────────────────────────
   async function sendInvite(contact) {
     if (!user?.uid) return;
     setInviteSending(contact.phone);
-
-    const expiresAt = Date.now() + 48 * 60 * 60 * 1000;
+    const expiresAt  = Date.now() + 48 * 60 * 60 * 1000;
     const inviteData = { sentBy: user.uid, sentAt: new Date().toISOString(), expiresAt };
-    const inviteLink = `https://yourapp.com/register?ref=${user.uid}&phone=${contact.phone}`;
-    const message = encodeURIComponent(
-      `નમસ્તે ${contact.name}! 🙏\n\nઆપણી Community Directory App માં જોડાઓ.\nતમારી profile બનાવો અને સમાજ સાથે જોડાઓ. 👇\n\n${inviteLink}`
+    const inviteLink = `${window.location.origin}/register?ref=${user.uid}&phone=${contact.phone}`; // ✅ FIX 4: dynamic domain
+    const message    = encodeURIComponent(
+      `નમસ્તે ${contact.name}! 🙏\n\nઆપણી Community Directory App માં જોડાઓ.\nતમારી profile બનાવો અને સમાજ સાથે જોડાઓ. 👇\n\n${inviteLink}\n\n⏳ આ link 48 કલાક valid છે.`
     );
-
     try {
       await Promise.all([
+        updatePath(`connectors/${contact.phone}`, { invitedBy: user.uid, invitedAt: Date.now(), invite: inviteData }),
         updatePath(`mobile_index/${contact.phone}`, { invite: inviteData }),
-        updatePath(`connectors/${contact.phone}`, {
-          invitedBy: user.uid,
-          invitedAt: Date.now(),
-          invite:    inviteData,
-        }),
       ]);
-
-      const statsRef = ref(db, `contest_contributions/${user.uid}`);
-      const snap = await get(statsRef);
-      const existing = snap.exists() ? snap.val() : {};
-      await set(statsRef, {
-        ...existing,
-        invitesSent: (existing.invitesSent || 0) + 1,
-        lastActivity: new Date().toISOString(),
-      });
-
       setInviteList(prev => prev.filter(c => c.phone !== contact.phone));
-      setStats(prev => ({ ...prev, invited: prev.invited + 1 }));
-
+      await loadStats();
       window.open(`https://wa.me/91${contact.phone}?text=${message}`, "_blank");
     } catch (e) { console.error(e); }
     setInviteSending(null);
   }
 
-  // ── Render ─────────────────────────────────────────────────
   return (
-    <div style={s.page}>
+    <div className="min-h-screen bg-slate-50 pb-10">
 
-      {/* Header */}
-      <div style={s.header}>
-        <div style={s.headerInner}>
+      {/* ── HEADER ── */}
+      <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#0f4c81 100%)" }}
+        className="px-4 pt-5 pb-5">
+        <div className="max-w-lg mx-auto flex justify-between items-center">
           <div>
-            <div style={s.headerLabel}>OSWAL CONNECTORS</div>
-            <h1 style={s.headerTitle}>Competition</h1>
+            <p className="text-xs font-bold tracking-widest text-blue-300 mb-1">OSWAL CONNECTORS</p>
+            <h1 className="text-3xl font-black text-white tracking-tight">Competition</h1>
           </div>
-          <div style={s.statsRow}>
+          <div className="flex gap-2">
             <StatPill icon="👥" label="Uploaded" value={stats.uploaded} color="#10b981" />
             <StatPill icon="📨" label="Invited"  value={stats.invited}  color="#f59e0b" />
             <StatPill icon="✅" label="Joined"   value={stats.joined}   color="#8b5cf6" />
           </div>
         </div>
-        <div style={{ maxWidth: 480, margin: "12px auto 0" }}>
-          <button style={s.leaderboardBtn} onClick={() => navigate("/leaderboard")}>
-            🏆 Full Leaderboard જુઓ
+        <div className="max-w-lg mx-auto mt-3 flex gap-2">
+          <button onClick={() => navigate("/leaderboard")}
+            className="flex-1 py-2.5 rounded-xl font-extrabold text-sm text-white cursor-pointer border-0"
+            style={{ background: "linear-gradient(135deg,#f59e0b,#ef4444)" }}>
+            🏆 Leaderboard
           </button>
+          <button
+  onClick={() => setShowRules(true)}
+  className="text-xs font-bold text-blue-400 underline ml-2"
+>
+  📜 Rules
+</button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={s.tabBar}>
-        <button style={tab === "add" ? s.tabActive : s.tab} onClick={() => setTab("add")}>
-          📱 Contacts ઉમેરો
-        </button>
-        <button style={tab === "invite" ? s.tabActive : s.tab} onClick={() => setTab("invite")}>
-          📲 Invite કરો
-        </button>
+      {/* ── TABS ── */}
+      <div className="sticky top-0 z-10 bg-white border-b-2 border-gray-100">
+        <div className="max-w-lg mx-auto flex">
+          {[
+            { key: "add",    label: "📱 Contacts ઉમેરો" },
+            { key: "invite", label: "📲 Invite કરો" },
+          ].map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex-1 py-3.5 text-sm font-bold cursor-pointer border-0 bg-transparent transition-colors
+                ${tab === t.key ? "text-blue-800 border-b-[3px] border-blue-800 -mb-0.5" : "text-gray-400"}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div style={s.body}>
+      <div className="max-w-lg mx-auto px-4 pt-4">
 
         {/* ── TAB 1: ADD CONTACTS ── */}
         {tab === "add" && (
           <div>
-            <button style={s.pickBtn} onClick={pickContacts}>
-              <span style={{ fontSize: 24 }}>📲</span>
+            <button onClick={pickContacts}
+              className="w-full flex items-center gap-4 px-5 py-5 rounded-2xl border-2 border-dashed border-blue-700 bg-blue-50 text-blue-800 font-bold text-left cursor-pointer mb-5">
+              <span className="text-2xl">📲</span>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>Contact Picker ખોલો</div>
-                <div style={{ fontSize: 12, opacity: 0.8 }}>Phone book માંથી contacts select કરો</div>
+                <div className="text-base font-extrabold">Contact Picker ખોલો</div>
+                <div className="text-xs opacity-70 mt-0.5">Phone book માંથી contacts select કરો</div>
               </div>
             </button>
 
             {picked.length > 0 && (
               <div>
-                <div style={s.listHeader}>
-                  <span style={s.listCount}>{picked.length} contacts selected</span>
-                  <button style={s.selectAllBtn} onClick={selectAll}>
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-sm font-bold text-gray-700">{picked.length} contacts picked</span>
+                  <button onClick={selectAll}
+                    className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg border-0 cursor-pointer">
                     ✅ બધા select ({validContacts.length})
                   </button>
                 </div>
 
-                <div style={s.contactList}>
-                  {picked.map((c) => {
-                    const valid = isValidName(c.name) && c.city;
+                <div className="flex flex-col gap-2.5 mb-4">
+                  {picked.map(c => {
+                    const valid     = isValidName(c.name) && c.city;
                     const isChecked = !!selected[c.id];
                     return (
-                      <div key={c.id} style={{
-                        ...s.contactCard,
-                        borderColor: isChecked ? "#10b981" : valid ? "#e5e7eb" : "#fde68a",
-                        background:  isChecked ? "#f0fdf4" : "#fff",
-                      }}>
-                        <div style={s.contactTop}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            disabled={!valid}
+                      <div key={c.id}
+                        className={`rounded-2xl border-2 px-3.5 py-3 transition-all
+                          ${isChecked ? "border-emerald-400 bg-emerald-50"
+                            : valid    ? "border-gray-200 bg-white"
+                            :            "border-amber-200 bg-white"}`}>
+                        <div className="flex items-center gap-2.5">
+                          <input type="checkbox" checked={isChecked} disabled={!valid}
                             onChange={() => toggleSelect(c.id)}
-                            style={s.checkbox}
-                          />
-                          <div style={s.contactInfo}>
+                            className="w-5 h-5 cursor-pointer shrink-0" />
+                          <div className="flex-1 min-w-0">
                             <input
-                              style={{
-                                ...s.nameInput,
-                                borderColor: isValidName(c.name) ? "#d1fae5" : "#fde68a",
-                              }}
+                              className={`w-full px-2.5 py-2 rounded-lg border-[1.5px] text-sm font-bold outline-none mb-1
+                                ${isValidName(c.name) ? "border-emerald-200" : "border-amber-300"}`}
                               value={c.name}
                               onChange={e => updateName(c.id, e.target.value)}
                               placeholder="પૂરું નામ (ઓછામાં ઓછા 2 words)"
+                              style={{ fontSize: 16 }}
                             />
-                            <div style={s.phoneText}>📞 {c.phone}</div>
+                            <p className="text-xs text-gray-500 font-semibold">📞 {c.phone}</p>
                           </div>
-                          <div style={s.rightActions}>
-                            <button
-                              style={{
-                                ...s.cityBtn,
-                                background: c.city ? "#d1fae5" : "#fef3c7",
-                                color:      c.city ? "#065f46" : "#92400e",
-                              }}
-                              onClick={() => openCityPopup(c.id)}
-                            >
+                          <div className="flex flex-col gap-1.5 items-end shrink-0">
+                            <button onClick={() => openCityPopup(c.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border-0 cursor-pointer whitespace-nowrap
+                                ${c.city ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
                               {c.city || "📍 City"}
                             </button>
-                            <button style={s.removeBtn} onClick={() => removeContact(c.id)}>✕</button>
+                            <button onClick={() => removeContact(c.id)}
+                              className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs font-black border-0 cursor-pointer flex items-center justify-center">
+                              ✕
+                            </button>
                           </div>
                         </div>
                         {!isValidName(c.name) && (
-                          <div style={s.warning}>⚠️ ઓછામાં ઓછા 2 words નું નામ લખો</div>
+                          <p className="text-xs text-amber-600 font-semibold mt-1.5 pl-8">⚠️ ઓછામાં ઓછા 2 words નું નામ લખો</p>
                         )}
                         {!c.city && isValidName(c.name) && (
-                          <div style={s.warning}>📍 City select કરો</div>
+                          <p className="text-xs text-amber-600 font-semibold mt-1.5 pl-8">📍 City select કરો</p>
                         )}
                       </div>
                     );
@@ -373,31 +309,30 @@ export default function ConnectorsPage() {
                 </div>
 
                 {selectedContacts.length > 0 && (
-                  <button
-                    style={{ ...s.submitBtn, opacity: submitting ? 0.7 : 1 }}
-                    onClick={handleSubmit}
-                    disabled={submitting}
-                  >
-                    {submitting
-                      ? "⏳ Uploading..."
-                      : `✅ ${selectedContacts.length} Contacts Submit કરો`}
+                  <button onClick={handleSubmit} disabled={submitting}
+                    className={`w-full py-4 rounded-2xl text-white text-base font-black border-0 cursor-pointer mt-1 transition-opacity
+                      ${submitting ? "opacity-60" : ""}`}
+                    style={{ background: "linear-gradient(135deg,#0f4c81,#1e3a5f)", boxShadow: "0 4px 20px rgba(15,76,129,0.35)" }}>
+                    {submitting ? "⏳ Uploading..." : `✅ ${selectedContacts.length} Contacts Submit કરો`}
                   </button>
                 )}
 
                 {submitDone && (
-                  <div style={s.successBanner}>🎉 Contacts successfully ઉમેરાઈ ગયા!</div>
+                  <div className="mt-3 px-5 py-3.5 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-sm text-center border-2 border-emerald-400">
+                    🎉 Contacts successfully ઉમેરાઈ ગયા!
+                  </div>
                 )}
               </div>
             )}
 
             {picked.length === 0 && (
-              <div style={s.emptyState}>
-                <div style={{ fontSize: 48 }}>👥</div>
-                <div style={s.emptyTitle}>Contact Picker ખોલો</div>
-                <div style={s.emptyText}>
-                  તમારા phone book માંથી community ના contacts select કરો,
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-5xl mb-3">👥</div>
+                <p className="text-lg font-extrabold text-gray-700 mb-2">Contact Picker ખોલો</p>
+                <p className="text-sm text-gray-500 leading-relaxed">
+                  Phone book માંથી community contacts select કરો,<br />
                   નામ edit કરો, city add કરો અને submit કરો.
-                </div>
+                </p>
               </div>
             )}
           </div>
@@ -406,59 +341,54 @@ export default function ConnectorsPage() {
         {/* ── TAB 2: INVITE ── */}
         {tab === "invite" && (
           <div>
-            <div style={s.inviteInfo}>
-              <span style={{ fontSize: 20 }}>📲</span>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>Personal WhatsApp Invite</div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  ફક્ત unregistered contacts • Invitation 48 કલાક valid
-                </div>
+            <div className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border-2 border-gray-100 mb-4">
+              <span className="text-xl">📲</span>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-gray-800">Personal WhatsApp Invite</p>
+                <p className="text-xs text-gray-500 mt-0.5">બધા unregistered contacts • Invite 48 કલાક valid</p>
               </div>
-              <button style={s.refreshBtn} onClick={loadInviteList}>🔄</button>
+              <button onClick={loadInviteList}
+                className="bg-gray-100 border-0 rounded-lg px-2.5 py-1.5 cursor-pointer text-base">
+                🔄
+              </button>
             </div>
 
             {inviteLoading && (
-              <div style={s.loadingBox}>⏳ List load થઈ રહ્યું છે...</div>
+              <div className="text-center py-8 text-gray-500 font-semibold">⏳ List load થઈ રહ્યું છે...</div>
             )}
 
             {!inviteLoading && inviteList.length === 0 && (
-              <div style={s.emptyState}>
-                <div style={{ fontSize: 48 }}>✅</div>
-                <div style={s.emptyTitle}>બધા invited છે!</div>
-                <div style={s.emptyText}>
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-5xl mb-3">✅</div>
+                <p className="text-lg font-extrabold text-gray-700 mb-2">બધા invited છે!</p>
+                <p className="text-sm text-gray-500 leading-relaxed">
                   હાલ કોઈ contact available નથી.<br />
                   48 કલાક પછી expire થયેલા contacts ફરી દેખાશે.
-                </div>
+                </p>
               </div>
             )}
 
             {!inviteLoading && inviteList.length > 0 && (
               <div>
-                <div style={s.listHeader}>
-                  <span style={s.listCount}>{inviteList.length} contacts available</span>
-                </div>
-                <div style={s.inviteList}>
+                <p className="text-sm font-bold text-gray-700 mb-3">{inviteList.length} contacts available</p>
+                <div className="flex flex-col gap-2.5">
                   {inviteList.map(c => (
-                    <div key={c.phone} style={s.inviteCard}>
-                      <div style={s.inviteAvatar}>
+                    <div key={c.phone}
+                      className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border-2 border-gray-100">
+                      <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-black text-lg shrink-0"
+                        style={{ background: "linear-gradient(135deg,#0f4c81,#10b981)" }}>
                         {c.name?.charAt(0)?.toUpperCase() || "?"}
                       </div>
-                      <div style={s.inviteDetails}>
-                        <div style={s.inviteName}>{c.name}</div>
-                        <div style={s.invitePhone}>📞 {c.phone}</div>
-                        {c.city && <div style={s.inviteCity}>📍 {c.city}</div>}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-extrabold text-sm text-gray-800 truncate">{c.name}</p>
+                        <p className="text-xs text-gray-500 font-semibold">📞 {c.phone}</p>
+                        {c.city && <p className="text-xs text-gray-400">📍 {c.city}</p>}
                       </div>
-                      <button
-                        style={{
-                          ...s.whatsappBtn,
-                          opacity: inviteSending === c.phone ? 0.6 : 1,
-                        }}
-                        onClick={() => sendInvite(c)}
-                        disabled={inviteSending === c.phone}
-                      >
-                        {inviteSending === c.phone
-                          ? "⏳"
-                          : <><span style={{ fontSize: 18 }}>💬</span> Invite</>}
+                      <button onClick={() => sendInvite(c)} disabled={inviteSending === c.phone}
+                        className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-white font-extrabold text-sm border-0 cursor-pointer shrink-0 transition-opacity
+                          ${inviteSending === c.phone ? "opacity-60" : ""}`}
+                        style={{ background: "#25d366" }}>
+                        {inviteSending === c.phone ? "⏳" : <><span className="text-lg">💬</span> Invite</>}
                       </button>
                     </div>
                   ))}
@@ -467,27 +397,33 @@ export default function ConnectorsPage() {
             )}
           </div>
         )}
-
       </div>
 
-      {/* ── City Popup ── */}
+      {/* ── CITY POPUP ── */}
       {cityTarget !== null && (
-        <div style={s.overlay} onClick={() => setCityTarget(null)}>
-          <div style={s.popup} onClick={e => e.stopPropagation()}>
-            <div style={s.popupHeader}>
-              <span style={{ fontSize: 18 }}>📍 City Select કરો</span>
-              <button style={s.popupClose} onClick={() => setCityTarget(null)}>✕</button>
+        <div className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.5)" }}
+          onClick={() => setCityTarget(null)}>
+          <div className="bg-white rounded-t-3xl w-full max-w-lg flex flex-col px-4 pt-5 pb-8"
+            style={{ maxHeight: "70vh" }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-base font-extrabold text-gray-800">📍 City Select કરો</span>
+              <button onClick={() => setCityTarget(null)}
+                className="w-8 h-8 rounded-full bg-gray-100 border-0 cursor-pointer text-base font-black text-gray-600">
+                ✕
+              </button>
             </div>
-            <input
-              style={s.citySearchInput}
+            <input className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 text-sm outline-none mb-4"
               placeholder="Search city..."
               value={citySearch}
               onChange={e => setCitySearch(e.target.value)}
-              autoFocus
-            />
-            <div style={s.cityGrid}>
+              style={{ fontSize: 16 }}
+              autoFocus />
+            <div className="grid grid-cols-3 gap-2 overflow-y-auto">
               {filteredCities.map(city => (
-                <button key={city} style={s.cityOption} onClick={() => selectCity(city)}>
+                <button key={city} onClick={() => selectCity(city)}
+                  className="py-2.5 px-2 rounded-xl border-2 border-gray-200 bg-gray-50 text-sm font-bold text-gray-800 cursor-pointer text-center hover:bg-blue-50 hover:border-blue-200 transition-colors">
                   {city}
                 </button>
               ))}
@@ -495,437 +431,79 @@ export default function ConnectorsPage() {
           </div>
         </div>
       )}
+      {showRules && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+    <div className="max-w-lg w-full rounded-2xl p-5"
+      style={{
+        background: "#0f172a",
+        border: "1px solid #334155",
+        maxHeight: "85vh",
+        overflowY: "auto"
+      }}>
 
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-black text-white">📜 સ્પર્ધાના નિયમો</h2>
+        <button
+          onClick={() => setShowRules(false)}
+          className="text-slate-400 hover:text-white text-lg font-bold"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="text-sm text-slate-300 space-y-4 leading-relaxed">
+
+        <div>
+          <p className="font-bold text-amber-400 mb-1">1️⃣ Upload Award</p>
+          <ul className="list-disc ml-5 space-y-1">
+            <li> માત્ર સમાજના વ્યક્તિઓના જ કોન્ટેક્ટ અપલોડ કરી શકશે.</li>
+
+<li>એક જ કોન્ટેક્ટ એકથી વધુ વખત (એકસાથે અથવા અલગ-અલગ સમયે) અપલોડ કરવામાં આવશે તો  તે ફક્ત એક જ વખત ગણાશે. </li>
+<li>
+દરેક કોન્ટેક્ટ માટે યોગ્ય અને સંપૂર્ણ નામ તથા શહેર (City) નોંધાયેલું હોવું ફરજિયાત છે. અધૂરી માહિતી ધરાવતા કોન્ટેક્ટ માન્ય ગણાશે નહીં.</li>
+
+<li>સ્પર્ધાની અંતિમ તારીખ સુધીમાં જે કોન્ટેક્ટ એપ પર આવીને સફળતાપૂર્વક રજીસ્ટ્રેશન કરશે, તે જ કોન્ટેક્ટ માન્ય ગણાશે.</li>
+
+<li>ઉદાહરણરૂપે:<br/>
+
+જો તમે 50 કોન્ટેક્ટ અપલોડ કર્યા હોય અને તેમાંમાંથી 40 લોકોએ અંતિમ તારીખ પહેલાં રજીસ્ટ્રેશન કર્યું હોય, તો ફક્ત તે 40 કોન્ટેક્ટ જ સ્પર્ધા માટે માન્ય ગણાશે.</li>
+          </ul>
+        </div>
+
+        <div>
+          <p className="font-bold text-blue-400 mb-1">2️⃣ Invite Award</p>
+          <ul className="list-disc ml-5 space-y-1">
+      <li>ઇન્વિટેશન પ્રક્રિયા 21 માર્ચથી શરૂ થશે.</li>  
+
+<li>ઇન્વિટેશન પેજ પર તે તમામ કોન્ટેક્ટનું લિસ્ટ જોવા મળશે, જે તમે અથવા અન્ય લોકોએ અપલોડ કર્યા છે પરંતુ હજુ સુધી રજીસ્ટ્રેશન કર્યું નથી.</li>
+
+<li>યુઝર પોતાના ઓળખાણના કોન્ટેક્ટને ઇન્વાઇટ કરી શકશે.</li>
+
+<li>સ્પર્ધાની અંતિમ તારીખ સુધીમાં ઇન્વાઇટ કરેલા કોન્ટેક્ટમાંથી જેટલા લોકોએ રજીસ્ટ્રેશન કર્યું હશે, તે સંખ્યા સ્પર્ધા માટે ગણવામાં આવશે.</li>
+</ul>
+        </div>
+
+        <div className="text-xs text-slate-400 pt-2 border-t border-slate-700">
+          🎯 હેતુ: સમાજના દરેક સભ્યને પ્લેટફોર્મ સાથે જોડવાનો.
+        </div>
+
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
 
-// ── Stat Pill ──────────────────────────────────────────────────
 function StatPill({ icon, label, value, color }) {
   return (
-    <div style={{ ...s.statPill, borderColor: color }}>
-      <span>{icon}</span>
+    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border min-w-[60px]"
+      style={{ background: "rgba(255,255,255,0.08)", borderColor: color }}>
+      <span className="text-sm">{icon}</span>
       <div>
-        <div style={{ fontSize: 16, fontWeight: 800, color }}>{value}</div>
-        <div style={{ fontSize: 10, color: "#9ca3af" }}>{label}</div>
+        <div className="text-base font-black leading-none" style={{ color }}>{value}</div>
+        <div className="text-[10px] text-gray-400 mt-0.5">{label}</div>
       </div>
     </div>
   );
 }
-
-// ── Styles ─────────────────────────────────────────────────────
-const s = {
-  page: {
-    minHeight: "100vh",
-    background: "#f8fafc",
-    fontFamily: "'Nunito', 'Segoe UI', sans-serif",
-    paddingBottom: 40,
-  },
-  header: {
-    background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #0f4c81 100%)",
-    padding: "20px 16px 20px",
-  },
-  headerInner: {
-    maxWidth: 480,
-    margin: "0 auto",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  headerLabel: {
-    fontSize: 10,
-    letterSpacing: 3,
-    color: "#93c5fd",
-    fontWeight: 700,
-    marginBottom: 4,
-  },
-  headerTitle: {
-    margin: 0,
-    fontSize: 28,
-    fontWeight: 900,
-    color: "#fff",
-    letterSpacing: -1,
-  },
-  statsRow: {
-    display: "flex",
-    gap: 8,
-  },
-  statPill: {
-    background: "rgba(255,255,255,0.08)",
-    border: "1px solid",
-    borderRadius: 12,
-    padding: "6px 10px",
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    color: "#fff",
-    minWidth: 60,
-  },
-  leaderboardBtn: {
-    width: "100%",
-    padding: "10px 16px",
-    borderRadius: 12,
-    border: "none",
-    background: "linear-gradient(135deg, #f59e0b, #ef4444)",
-    color: "#fff",
-    fontWeight: 800,
-    fontSize: 14,
-    cursor: "pointer",
-    fontFamily: "'Nunito', sans-serif",
-  },
-  tabBar: {
-    maxWidth: 480,
-    margin: "0 auto",
-    display: "flex",
-    background: "#fff",
-    borderBottom: "2px solid #e5e7eb",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
-  },
-  tab: {
-    flex: 1,
-    padding: "14px 8px",
-    border: "none",
-    background: "transparent",
-    fontSize: 14,
-    fontWeight: 600,
-    color: "#9ca3af",
-    cursor: "pointer",
-    borderBottom: "3px solid transparent",
-    marginBottom: -2,
-    fontFamily: "'Nunito', sans-serif",
-  },
-  tabActive: {
-    flex: 1,
-    padding: "14px 8px",
-    border: "none",
-    background: "transparent",
-    fontSize: 14,
-    fontWeight: 800,
-    color: "#0f4c81",
-    cursor: "pointer",
-    borderBottom: "3px solid #0f4c81",
-    marginBottom: -2,
-    fontFamily: "'Nunito', sans-serif",
-  },
-  body: {
-    maxWidth: 480,
-    margin: "0 auto",
-    padding: "16px",
-  },
-  pickBtn: {
-    width: "100%",
-    padding: "18px 20px",
-    borderRadius: 16,
-    border: "2px dashed #0f4c81",
-    background: "#eff6ff",
-    color: "#0f4c81",
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    gap: 14,
-    marginBottom: 20,
-    textAlign: "left",
-  },
-  listHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  listCount: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: "#374151",
-  },
-  selectAllBtn: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: "#10b981",
-    background: "#d1fae5",
-    border: "none",
-    borderRadius: 8,
-    padding: "6px 12px",
-    cursor: "pointer",
-  },
-  contactList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-    marginBottom: 16,
-  },
-  contactCard: {
-    background: "#fff",
-    borderRadius: 14,
-    border: "2px solid",
-    padding: "12px 14px",
-    transition: "all 0.2s",
-  },
-  contactTop: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    cursor: "pointer",
-    flexShrink: 0,
-  },
-  contactInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  nameInput: {
-    width: "100%",
-    padding: "8px 10px",
-    borderRadius: 8,
-    border: "1.5px solid",
-    fontSize: 14,
-    fontWeight: 700,
-    fontFamily: "'Nunito', sans-serif",
-    outline: "none",
-    boxSizing: "border-box",
-    marginBottom: 4,
-  },
-  phoneText: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontWeight: 600,
-  },
-  rightActions: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-    alignItems: "flex-end",
-    flexShrink: 0,
-  },
-  cityBtn: {
-    padding: "5px 10px",
-    borderRadius: 8,
-    border: "none",
-    fontSize: 12,
-    fontWeight: 800,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-  removeBtn: {
-    width: 24,
-    height: 24,
-    borderRadius: "50%",
-    border: "none",
-    background: "#fee2e2",
-    color: "#ef4444",
-    fontSize: 12,
-    fontWeight: 800,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  warning: {
-    fontSize: 11,
-    color: "#d97706",
-    fontWeight: 600,
-    marginTop: 6,
-    paddingLeft: 30,
-  },
-  submitBtn: {
-    width: "100%",
-    padding: "16px",
-    borderRadius: 14,
-    border: "none",
-    background: "linear-gradient(135deg, #0f4c81, #1e3a5f)",
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: 800,
-    cursor: "pointer",
-    marginTop: 8,
-    fontFamily: "'Nunito', sans-serif",
-    boxShadow: "0 4px 20px rgba(15,76,129,0.4)",
-  },
-  successBanner: {
-    marginTop: 12,
-    padding: "14px 20px",
-    borderRadius: 12,
-    background: "#d1fae5",
-    color: "#065f46",
-    fontWeight: 800,
-    fontSize: 15,
-    textAlign: "center",
-    border: "2px solid #10b981",
-  },
-  emptyState: {
-    textAlign: "center",
-    padding: "50px 20px",
-    color: "#9ca3af",
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: 800,
-    color: "#374151",
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    lineHeight: 1.6,
-    color: "#6b7280",
-  },
-  inviteInfo: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    padding: "14px 16px",
-    background: "#fff",
-    borderRadius: 14,
-    border: "2px solid #e5e7eb",
-    marginBottom: 16,
-  },
-  refreshBtn: {
-    marginLeft: "auto",
-    background: "#f3f4f6",
-    border: "none",
-    borderRadius: 8,
-    padding: "6px 10px",
-    cursor: "pointer",
-    fontSize: 16,
-  },
-  loadingBox: {
-    textAlign: "center",
-    padding: 30,
-    color: "#6b7280",
-    fontWeight: 600,
-  },
-  inviteList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  },
-  inviteCard: {
-    background: "#fff",
-    borderRadius: 14,
-    border: "2px solid #e5e7eb",
-    padding: "14px 16px",
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-  },
-  inviteAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: "50%",
-    background: "linear-gradient(135deg, #0f4c81, #10b981)",
-    color: "#fff",
-    fontWeight: 900,
-    fontSize: 18,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  inviteDetails: {
-    flex: 1,
-    minWidth: 0,
-  },
-  inviteName: {
-    fontWeight: 800,
-    fontSize: 15,
-    color: "#1f2937",
-  },
-  invitePhone: {
-    fontSize: 12,
-    color: "#6b7280",
-    fontWeight: 600,
-  },
-  inviteCity: {
-    fontSize: 11,
-    color: "#9ca3af",
-  },
-  whatsappBtn: {
-    padding: "10px 16px",
-    borderRadius: 12,
-    border: "none",
-    background: "#25d366",
-    color: "#fff",
-    fontWeight: 800,
-    fontSize: 13,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    flexShrink: 0,
-    fontFamily: "'Nunito', sans-serif",
-  },
-  overlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.5)",
-    zIndex: 100,
-    display: "flex",
-    alignItems: "flex-end",
-    justifyContent: "center",
-  },
-  popup: {
-    background: "#fff",
-    borderRadius: "20px 20px 0 0",
-    width: "100%",
-    maxWidth: 480,
-    maxHeight: "70vh",
-    display: "flex",
-    flexDirection: "column",
-    padding: "20px 16px 32px",
-  },
-  popupHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
-    fontWeight: 800,
-    fontSize: 16,
-    color: "#1f2937",
-  },
-  popupClose: {
-    background: "#f3f4f6",
-    border: "none",
-    borderRadius: "50%",
-    width: 32,
-    height: 32,
-    cursor: "pointer",
-    fontSize: 16,
-    fontWeight: 800,
-    color: "#374151",
-  },
-  citySearchInput: {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "2px solid #e5e7eb",
-    fontSize: 15,
-    fontFamily: "'Nunito', sans-serif",
-    outline: "none",
-    marginBottom: 14,
-    boxSizing: "border-box",
-  },
-  cityGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: 8,
-    overflowY: "auto",
-  },
-  cityOption: {
-    padding: "10px 8px",
-    borderRadius: 10,
-    border: "2px solid #e5e7eb",
-    background: "#f9fafb",
-    fontSize: 13,
-    fontWeight: 700,
-    cursor: "pointer",
-    color: "#1f2937",
-    fontFamily: "'Nunito', sans-serif",
-    textAlign: "center",
-  },
-};

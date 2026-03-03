@@ -170,7 +170,7 @@ export function ContactReorder({
             )}
 
             {/* 👤 Me selector */}
-            <button
+         {/*   <button
               onClick={() => markSelf(c.id)}
               className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
                 c.isSelf
@@ -179,7 +179,7 @@ export function ContactReorder({
               }`}
             >
               👤 Me
-            </button>
+            </button>*/}
 
             {/* Order */}
             {i !== 0 && (
