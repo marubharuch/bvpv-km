@@ -5,94 +5,11 @@ import { uploadToCloudinary } from "../../services/cloudinaryService";
 import { updateMemberPhoto } from "../../services/memberService";
 import { getCroppedImg } from "../../utils/cropImage";
 
-export default function PhotoUploadPro({ memberId, photoURL }) {
-  const fileInput = useRef();
-
-  const [imageSrc, setImageSrc] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
-
-  const openPicker = () => fileInput.current.click();
-
-  const handleFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setImageSrc(reader.result);
-    reader.readAsDataURL(file);
-  };
-
-  const onCropComplete = useCallback((_, croppedPixels) => {
-    setCroppedAreaPixels(croppedPixels);
-  }, []);
-
-  const handleUpload = async () => {
-    setUploading(true);
-    try {
-      const croppedImage = await getCroppedImg(imageSrc, croppedAreaPixels, rotation);
-      const blob = await fetch(croppedImage).then(r => r.blob());
-      const compressed = await imageCompression(blob, {
-        maxSizeMB: 0.3, maxWidthOrHeight: 800, useWebWorker: true,
-      });
-      const url = await uploadToCloudinary(compressed);
-      await updateMemberPhoto(memberId, url);
-      setImageSrc(null);
-    } catch (err) {
-      console.error("Upload failed:", err);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col items-center">
-      <div
-        onClick={openPicker}
-        className="w-20 h-20 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center cursor-pointer border"
-      >
-        {photoURL
-          ? <img src={photoURL} alt="" className="w-full h-full object-cover" />
-          : "📷"}
-      </div>
-
-      <input ref={fileInput} type="file" accept="image/*" capture="environment" onChange={handleFile} hidden />
-
-      {imageSrc && (
-        <div className="fixed inset-0 bg-black/90 flex flex-col items-center justify-center z-50">
-          <div className="relative w-80 h-80 bg-black">
-            <Cropper
-              image={imageSrc} crop={crop} zoom={zoom} rotation={rotation}
-              aspect={1} cropShape="round"
-              onCropChange={setCrop} onZoomChange={setZoom}
-              onRotationChange={setRotation} onCropComplete={onCropComplete}
-            />
-          </div>
-          <div className="flex gap-2 mt-4">
-            <button onClick={() => setRotation(r => r - 90)} className="bg-gray-700 text-white px-3 py-1 rounded">Rotate</button>
-            <button onClick={handleUpload} disabled={uploading} className="bg-blue-500 text-white px-4 py-2 rounded">
-              {uploading ? "Uploading..." : "Save Photo"}
-            </button>
-            <button onClick={() => setImageSrc(null)} className="bg-red-500 text-white px-3 py-2 rounded">Cancel</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-import { useRef, useState, useCallback } from "react";
-import Cropper from "react-easy-crop";
-import imageCompression from "browser-image-compression";
-import { uploadToCloudinary } from "../../services/cloudinaryService";
-import { updateMemberPhoto } from "../../services/memberService";
-import { getCroppedImg } from "../../utils/cropImage";
-
-export default function PhotoUploadPro({ memberId, photoURL }) {
+export default function PhotoUploadPro({ memberId, photoURL, onPhotoUpdate }) {
   const galleryInput = useRef();
   const cameraInput  = useRef();
 
+  const [localPhoto,        setLocalPhoto]        = useState(photoURL);
   const [showOptions,       setShowOptions]       = useState(false);
   const [imageSrc,          setImageSrc]          = useState(null);
   const [uploading,         setUploading]         = useState(false);
@@ -100,8 +17,6 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
   const [zoom,              setZoom]              = useState(1);
   const [rotation,          setRotation]          = useState(0);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
-
-  const openOptions = () => setShowOptions(true);
 
   const handleFile = (e) => {
     const file = e.target.files[0];
@@ -133,6 +48,8 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
       });
       const url = await uploadToCloudinary(compressed);
       await updateMemberPhoto(memberId, url);
+      if (onPhotoUpdate) onPhotoUpdate(memberId, url);
+      setLocalPhoto(url);
       setImageSrc(null);
     } catch (err) {
       console.error("Upload failed:", err);
@@ -144,24 +61,25 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
   return (
     <div className="flex flex-col items-center">
 
-      {/* Avatar tap target */}
+      {/* Avatar */}
       <div
-        onClick={openOptions}
+        onClick={() => {
+          if (photoURL && !window.confirm("Replace existing photo?")) return;
+          setShowOptions(true);
+        }}
         className="relative w-20 h-20 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center cursor-pointer border-2 border-white shadow-md"
       >
-        {photoURL
-          ? <img src={photoURL} alt="" className="w-full h-full object-cover" />
-          : <span className="text-3xl">👤</span>}
-        <div className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center border-2 border-white">
-          <span style={{ fontSize: 11 }}>📷</span>
-        </div>
+        {localPhoto
+          ? <img src={localPhoto} alt="" className="w-full h-full object-cover" />
+          : <span style={{ fontSize: 28, opacity: 0.35 }}>👤</span>}
+        
       </div>
 
-      {/* hidden inputs */}
+      {/* Hidden file inputs */}
       <input ref={galleryInput} type="file" accept="image/*" onChange={handleFile} hidden />
       <input ref={cameraInput}  type="file" accept="image/*" capture="environment" onChange={handleFile} hidden />
 
-      {/* Option bottom sheet */}
+      {/* Bottom sheet — Camera or Gallery */}
       {showOptions && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center"
@@ -169,23 +87,24 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
           onClick={() => setShowOptions(false)}
         >
           <div
-            className="w-full max-w-md rounded-t-3xl pb-8 pt-4 px-4"
-            style={{ background: "#fff" }}
+            className="w-full max-w-md rounded-t-3xl pb-8 pt-4 px-4 bg-white"
             onClick={e => e.stopPropagation()}
           >
             <div className="w-10 h-1 rounded-full bg-gray-300 mx-auto mb-5" />
             <p className="text-base font-extrabold text-gray-800 text-center mb-5">Profile Photo</p>
 
             <div className="flex gap-3 mb-4">
+              {/* Gallery */}
               <button
                 onClick={() => galleryInput.current.click()}
                 className="flex-1 flex flex-col items-center gap-2 py-5 rounded-2xl border-2 border-gray-200 bg-gray-50 cursor-pointer"
               >
                 <span className="text-4xl">🖼️</span>
                 <span className="text-sm font-bold text-gray-700">Select Photo</span>
-                <span className="text-xs text-gray-400">from Gallery</span>
+                <span className="text-xs text-gray-400">from Device</span>
               </button>
 
+              {/* Camera */}
               <button
                 onClick={() => cameraInput.current.click()}
                 className="flex-1 flex flex-col items-center gap-2 py-5 rounded-2xl border-2 border-blue-100 bg-blue-50 cursor-pointer"
@@ -248,7 +167,6 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
           </div>
 
           <div className="shrink-0 px-4 pb-8 space-y-4">
-
             <div className="flex items-center gap-3">
               <span className="text-xs text-slate-400 w-10 text-right font-semibold">Zoom</span>
               <input
@@ -268,7 +186,7 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
                 onChange={e => setRotation(Number(e.target.value))}
                 className="flex-1 accent-purple-500"
               />
-              <span className="text-xs text-slate-400 w-10 font-semibold">{rotation}deg</span>
+              <span className="text-xs text-slate-400 w-10 font-semibold">{rotation}°</span>
             </div>
 
             <div className="flex gap-2 justify-center">
@@ -277,7 +195,7 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white border-0 cursor-pointer"
                 style={{ background: "#1e293b" }}
               >
-                Rotate Left
+                ↺ Left
               </button>
               <button
                 onClick={() => { setRotation(0); setZoom(1); setCrop({ x: 0, y: 0 }); }}
@@ -291,7 +209,7 @@ export default function PhotoUploadPro({ memberId, photoURL }) {
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white border-0 cursor-pointer"
                 style={{ background: "#1e293b" }}
               >
-                Rotate Right
+                Right ↻
               </button>
             </div>
           </div>

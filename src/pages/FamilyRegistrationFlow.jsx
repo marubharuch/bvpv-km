@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { ref, get } from "firebase/database";
-import { db } from "../firebase";
+import { db } from "../firebase"; // still used for registration check
 import { useFamilyRegistration, STEPS } from "../hooks/useFamilyRegistration";
 import { CityPicker } from "../components/family/CityPicker";
 import { ContactCollector } from "../components/family/ContactCollector";
@@ -20,7 +20,10 @@ const STEP_PCT = {
 
 export default function FamilyRegistrationFlow({ onDone }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, isLoading } = useAuth();
+  // Mobile passed from OnboardingPage when user already entered it there
+  const passedMobile = location.state?.mobile || "";
 
   const [submitting,           setSubmitting]           = useState(false);
   const [submitErr,            setSubmitErr]            = useState(null);
@@ -42,19 +45,14 @@ export default function FamilyRegistrationFlow({ onDone }) {
       .finally(() => setCheckingRegistration(false));
   }, [user]);
   // Pre-seed the user's own contact as the first entry (only if no draft exists)
-useEffect(() => {
-  if (!user?.uid || reg.contacts.length > 0) return;
-
-  get(ref(db, `users/${user.uid}/mobile`))
-    .then(snap => {
-      const mobile = snap.val() || "";
-      const name   = user.displayName || "";
-      if (mobile || name) {
-        reg.addContacts([{ name, phone: mobile, isSelf: true }]);
-      }
-    })
-    .catch(() => {});
-}, [user?.uid, reg.contacts.length]);// eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!user?.uid || reg.contacts.length > 0) return;
+    const name  = user.displayName || user.email?.split("@")[0] || "";
+    const phone = passedMobile || "";
+    if (name) {
+      reg.addContacts([{ name, phone, isSelf: true }]);
+    }
+  }, [user?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading || checkingRegistration) return <div>Loading...</div>;
   if (!user) return null;

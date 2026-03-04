@@ -8,7 +8,7 @@ import localforage from "localforage";
 // CACHE KEYS & TTL
 // ─────────────────────────────────────────────
 const CACHE_LEADERS_KEY = "leaders_orgMap_v1";    // stores { orgId: [entry,...] }
-const CACHE_PHOTOS_KEY  = "leaders_photos_v1";    // stores { photoURL: base64 }
+const CACHE_PHOTOS_KEY  = "leaders_photos_v1";    // stores { photoURL: { data, savedAt } }
 const CACHE_META_KEY    = "leaders_meta_v1";      // stores { savedAt }
 const CACHE_TTL_MS      = 4 * 60 * 60 * 1000;    // 4 hours
 
@@ -44,26 +44,36 @@ const POST_ICONS = {
 // PHOTO CACHING HELPERS
 // ─────────────────────────────────────────────
 
-// Fetch a remote image and store it as base64 in localforage
-async function fetchAndCachePhoto(url) {
+/**
+ * The URL itself is used as the cache key.
+ * If the photo changes, the profile-save code should append ?v=timestamp
+ * to the URL — that makes it a new key → automatic cache miss → fresh fetch.
+ *
+ * e.g.  photoURL = `${downloadURL}?v=${Date.now()}`
+ */
+async function fetchAndCachePhoto(url, forceRefresh = false) {
   if (!url) return null;
   try {
-    // Check if already cached
     const photos = (await localforage.getItem(CACHE_PHOTOS_KEY)) || {};
-    if (photos[url]) return photos[url];
+    const cached = photos[url];
 
-    // Fetch and convert to base64
+    // Return cached data if still fresh and not a forced refresh
+    if (cached && !forceRefresh && (Date.now() - cached.savedAt < CACHE_TTL_MS)) {
+      return cached.data;
+    }
+
+    // Fetch fresh from Firebase Storage (or any URL)
     const response = await fetch(url);
     const blob     = await response.blob();
     const base64   = await new Promise((resolve, reject) => {
-      const reader  = new FileReader();
-      reader.onload = () => resolve(reader.result);
+      const reader   = new FileReader();
+      reader.onload  = () => resolve(reader.result);
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
 
-    // Save back
-    photos[url] = base64;
+    // Save with timestamp so TTL works
+    photos[url] = { data: base64, savedAt: Date.now() };
     await localforage.setItem(CACHE_PHOTOS_KEY, photos);
     return base64;
   } catch {
@@ -72,7 +82,7 @@ async function fetchAndCachePhoto(url) {
 }
 
 // Resolve all photoURLs in orgMap to cached base64
-async function resolvePhotos(orgMap) {
+async function resolvePhotos(orgMap, forceRefresh = false) {
   const allUrls = new Set();
   Object.values(orgMap).forEach(leaders =>
     leaders.forEach(e => { if (e.photoURL) allUrls.add(e.photoURL); })
@@ -82,7 +92,7 @@ async function resolvePhotos(orgMap) {
   const resolved = {};
   await Promise.all(
     [...allUrls].map(async url => {
-      resolved[url] = await fetchAndCachePhoto(url);
+      resolved[url] = await fetchAndCachePhoto(url, forceRefresh);
     })
   );
 
@@ -124,13 +134,13 @@ async function clearAllCache() {
     await Promise.all([
       localforage.removeItem(CACHE_LEADERS_KEY),
       localforage.removeItem(CACHE_META_KEY),
-      // intentionally keep CACHE_PHOTOS_KEY — photos don't change often
+      localforage.removeItem(CACHE_PHOTOS_KEY), // ✅ clear photos too on force refresh
     ]);
   } catch {}
 }
 
 // ─────────────────────────────────────────────
-// RTDB FETCH  (reads honoraryIndex only)
+// RTDB FETCH
 // ─────────────────────────────────────────────
 async function fetchHonoraryIndex() {
   const snap = await get(ref(db, "honoraryIndex"));
@@ -285,11 +295,14 @@ export default function About() {
       }
 
       if (!data) {
-        // 1. Fetch raw data from RTDB (honoraryIndex only — very cheap)
+        // 1. Fetch raw data from RTDB
         const raw = await fetchHonoraryIndex();
 
         // 2. Resolve & cache all photos locally
-        data = await resolvePhotos(raw);
+        //    Pass forceRefresh so photos are re-fetched too when user taps 🔄
+        //    Also: if a member's photoURL changed (new ?v=timestamp), it's a
+        //    new cache key → fetched fresh automatically even without force refresh
+        data = await resolvePhotos(raw, forceRefresh);
 
         // 3. Save resolved data to localforage
         await writeDataCache(data);
@@ -359,7 +372,6 @@ export default function About() {
 
       <div className="flex items-start justify-between mb-3">
         <div>
-        
           <h1 className="text-xl font-bold mt-0.5" style={{ color: "#F0D080" }}>
             🏅 હોદ્દેદારો-Honoured Dignitary
           </h1>

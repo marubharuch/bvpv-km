@@ -1,3 +1,8 @@
+/**
+ * context/AuthContext.jsx
+ * FIX BUG 7: Removed familyPin from serialized user.
+ * familyPin is NOT on the user node — it lives at families/{id}/familyPin.
+ */
 import { createContext, useContext, useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { saveCache, loadCache } from "../utils/cache";
@@ -11,7 +16,6 @@ export function AuthProvider({ children }) {
   const [isLoading,       setIsLoading]       = useState(true);
   const [authInitialized, setAuthInitialized] = useState(false);
 
-  // Load cached user on mount for instant PrivateRoute unblock
   useEffect(() => {
     const loadStoredUser = async () => {
       try {
@@ -29,21 +33,28 @@ export function AuthProvider({ children }) {
     loadStoredUser();
   }, []);
 
-  // Firebase auth state listener
   useEffect(() => {
-    const unsub = onAuthStateChanged(getAuth(), async (u) => {
-      if (!u) {
-        setUser(null);
-        setProfile(null);
-        localStorage.removeItem("lastUser");
-        await saveCache("currentUser", null);
-        setIsLoading(false);
-        setAuthInitialized(true);
-        return;
-      }
+// AuthContext.jsx — replace the onAuthStateChanged callback
+// AuthContext.jsx — replace the onAuthStateChanged callback
+const unsub = onAuthStateChanged(getAuth(), async (u) => {
+  if (!u) {
+    setUser(null);
+    setProfile(null);
+    localStorage.removeItem("lastUser");
+    await saveCache("currentUser", null);
+    setIsLoading(false);
+    setAuthInitialized(true);
+    return;
+  }
 
-      try {
-        const userData = await getUserData(u.uid, u.email);
+  try {
+    // ✅ Wait for token AND give RTDB connection time to authenticate
+    await u.getIdToken(true);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const userData = await getUserData(u.uid, u.email);
+    // ... rest of your existing code unchanged
+      
 
         const serializableUser = {
           uid:           u.uid,
@@ -53,7 +64,9 @@ export function AuthProvider({ children }) {
           emailVerified: u.emailVerified,
           familyId:      userData.familyId  || null,
           role:          userData.role      || null,
-          familyPin:     userData.familyPin || null,
+          memberId:      userData.memberId  || null,
+          // FIX BUG 7: familyPin removed — NOT on user node
+          // Fetch from families/{familyId}/familyPin when needed
         };
 
         setUser(serializableUser);

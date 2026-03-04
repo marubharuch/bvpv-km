@@ -165,16 +165,20 @@ export function useMemberForm({ open, mode, member, familyId, onClose }) {
         ? `${form.dobDay}/${form.dobMonth}/${form.dobYear}` : "";
       const assembledName = form.name?.trim()
         ? toProperCase(form.name.trim()) : "";
-
+        const fullMobile = form.mobile?.trim()
+  ? `${form.countryCode || "+91"}${form.mobile.trim()}`
+  : "";
+const mobileKey  = normalizeMobile(fullMobile); 
       const payload = {
         ...form,
         name:    assembledName,
-        mobile:  assembledMobile,
+        mobile:      mobileKey,              // keep as 10 digits
+  countryCode: form.countryCode || "+91",  // save separately
         dob:     assembledDob,
         education: buildEducation(form),
         married: form.maritalStatus === "Married" || form.maritalStatus === "Engaged",
       };
-      delete payload.countryCode;
+      //delete payload.countryCode;
       delete payload.dobDay;
       delete payload.dobMonth;
       delete payload.dobYear;

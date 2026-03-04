@@ -26,9 +26,10 @@ export async function ensureUserRecord(firebaseUser, extraFields = {}) {
 
     // Full user node
     updates[`users/${firebaseUser.uid}`] = userSchema({
-      email: firebaseUser.email || null,
-      mobile: extraFields.mobile || null,
-    });
+  email:       firebaseUser.email        || null,
+  mobile:      extraFields.mobile        || null,  // +919974021397
+  countryCode: extraFields.countryCode   || "+91",
+});
 
     // Email index
     if (firebaseUser.email) {

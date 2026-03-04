@@ -27,20 +27,33 @@ export default function LoginPage() {
     return digits ? `${countryCode}${digits}` : "";
   };
 
-  const afterAuth = async (uid) => {
+  // LoginPage.jsx
+const afterAuth = async (uid) => {
+  try {
+    // ✅ wait for token to propagate
+    const currentUser = getAuth().currentUser;
+    if (currentUser) await currentUser.getIdToken(true);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     const snap = await get(ref(db, `users/${uid}/familyId`));
     if (snap.exists() && snap.val()) {
       navigate("/dashboard", { replace: true });
     } else {
       navigate("/onboarding", { replace: true });
     }
-  };
+  } catch (e) {
+    console.error("afterAuth error:", e);
+    // ✅ still navigate even if DB read fails
+    navigate("/onboarding", { replace: true });
+  }
+};
 
   const loginWithGoogle = async () => {
     setLoading(true);
     setLoadingMsg("Signing in with Google...");
     try {
       const provider = new GoogleAuthProvider();
+       provider.setCustomParameters({ prompt: 'select_account' }); // ✅ add this
       const res      = await signInWithPopup(auth, provider);
       setLoadingMsg("Setting up your account...");
       await ensureUserRecord(res.user);
@@ -71,7 +84,10 @@ export default function LoginPage() {
     try {
       const res = await createUserWithEmailAndPassword(auth, email, password);
       setLoadingMsg("Setting up your account...");
-      await ensureUserRecord(res.user, { mobile: normalizedMobile() });
+     await ensureUserRecord(res.user, { 
+  mobile:      normalizedMobile(),        // +919974021397
+  countryCode: countryCode || "+91",
+});
       await afterAuth(res.user.uid);
     } catch (e) {
       alert(e.message);

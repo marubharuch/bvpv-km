@@ -13,6 +13,7 @@ import { ref, get } from "firebase/database";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { checkMobileIndex, registerMobileForUser } from "../services/mobileIndexService";
+import { batchWrite } from "../services/rtdbService";
 import { linkUserToFamily } from "../services/userService";
 import Card from "../components/ui/Card";
 import Spinner from "../components/ui/Spinner";
@@ -30,7 +31,7 @@ const STAGE = {
 };
 
 export default function OnboardingPage() {
-  const { user } = useContext(AuthContext);
+  const { user, isLoading, authInitialized } = useContext(AuthContext);
   const navigate  = useNavigate();
 
   const [stage,       setStage]       = useState(STAGE.LOADING);
@@ -46,10 +47,12 @@ export default function OnboardingPage() {
   const [error,       setError]       = useState("");
 
   useEffect(() => {
+    if (!authInitialized) return;          // wait — auth token not confirmed yet
+    if (isLoading) return;
     if (!user?.uid) { navigate("/login", { replace: true }); return; }
     if (user.familyId) { navigate("/dashboard", { replace: true }); return; }
 
-    const init = async () => {
+    const init = async (retries = 3) => {
       try {
         const snap     = await get(ref(db, `users/${user.uid}`));
         const userData = snap.exists() ? snap.val() : {};
@@ -60,6 +63,10 @@ export default function OnboardingPage() {
         if (mob) { setMobile(mob); await checkMob(mob); }
         else setStage(STAGE.ASK_MOBILE);
       } catch (e) {
+        if (retries > 0 && e.message?.toLowerCase().includes("permission")) {
+          await new Promise(r => setTimeout(r, 1000));
+          return init(retries - 1);
+        }
         console.error("Onboarding init error:", e);
         setError("Something went wrong. Please try again.");
         setStage(STAGE.ASK_MOBILE);
@@ -67,9 +74,9 @@ export default function OnboardingPage() {
     };
     init();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid]);
+  }, [user?.uid, authInitialized, isLoading]);
 
-  const checkMob = async (mob) => {
+  const checkMob = async (mob, retries = 3) => {
     setStage(STAGE.CHECKING);
     setError("");
     try {
@@ -84,10 +91,12 @@ export default function OnboardingPage() {
       if (!famSnap.exists()) { setStage(STAGE.NOT_FOUND); return; }
 
       const famData = famSnap.val();
-      const mid     = indexData.memberIds ? Object.keys(indexData.memberIds)[0] : null;
+      // Support both migrated format (memberId) and app format (memberIds map)
+      const mid = indexData.memberId ||
+        (indexData.memberIds ? Object.keys(indexData.memberIds)[0] : null);
 
-      let hName = "";
-      if (famData.headMemberId) {
+      let hName = famData.headName || "";
+      if (!hName && famData.headMemberId) {
         const headSnap = await get(ref(db, `members/${famData.headMemberId}`));
         if (headSnap.exists()) hName = headSnap.val().name || "";
       }
@@ -98,6 +107,11 @@ export default function OnboardingPage() {
       setHeadName(hName);
       setStage(STAGE.FAMILY_FOUND);
     } catch (e) {
+      // Auth token may not have reached RTDB yet — retry with backoff
+      if (retries > 0 && e.message?.toLowerCase().includes("permission")) {
+        await new Promise(r => setTimeout(r, 1000));
+        return checkMob(mob, retries - 1);
+      }
       console.error("mobileIndex check error:", e);
       setError("Could not check your mobile. Please try again.");
       setStage(STAGE.ASK_MOBILE);
@@ -107,15 +121,14 @@ export default function OnboardingPage() {
   const handleMobileSubmit = async () => {
     const digits = mobileInput.trim().replace(/\D/g, "").slice(-10);
     if (digits.length < 10) { setError("Enter a valid 10-digit mobile number."); return; }
-    const fullMobile = `${ccInput}${digits}`;
     setMobile(digits);
 
+    // Save mobile to user node now so it's remembered on next login
     try {
-      await registerMobileForUser(digits, user.uid);
-      await get(ref(db, `users/${user.uid}/mobile`)); // touch to update
-      // Save mobile to user node
-      const { batchWrite } = await import("../services/rtdbService");
-      await batchWrite({ [`users/${user.uid}/mobile`]: fullMobile });
+      await batchWrite({
+        [`users/${user.uid}/mobile`]     : `${ccInput}${digits}`,
+        [`users/${user.uid}/countryCode`]: ccInput,
+      });
     } catch (e) {
       console.error("Mobile save error:", e);
     }
@@ -130,13 +143,14 @@ export default function OnboardingPage() {
 
     setStage(STAGE.LINKING);
     try {
-      await linkUserToFamily({
-        uid:      user.uid,
-        familyId,
-        memberId,
-        mobile,
-        email:    user.email,
-      });
+     await linkUserToFamily({
+    uid:         user.uid,
+    familyId,
+    memberId,
+    mobile,              // ← keep 10 digits for mobileIndex lookup inside linkUserToFamily
+    fullMobile:  `${ccInput}${mobile}`,   // ← +919974021397 for saving to user node
+    email:       user.email,
+  });
       navigate("/dashboard", { replace: true });
     } catch (e) {
       console.error("Link family error:", e);
@@ -146,7 +160,7 @@ export default function OnboardingPage() {
   };
 
   // Loading / Checking / Linking
-  if ([STAGE.LOADING, STAGE.CHECKING, STAGE.LINKING].includes(stage)) {
+  if (!authInitialized || isLoading || [STAGE.LOADING, STAGE.CHECKING, STAGE.LINKING].includes(stage)) {
     const msg = stage === STAGE.LOADING  ? "Setting up your account..." :
                 stage === STAGE.CHECKING ? "Looking up your family..."  :
                                            "Linking you to your family...";
@@ -162,7 +176,7 @@ export default function OnboardingPage() {
           <p className="text-sm" style={{ color: "#9B6060" }}>
             Your mobile number is not linked to any family yet.
           </p>
-          <button onClick={() => navigate("/registration")}
+          <button onClick={() => navigate("/registration", { state: { mobile: `${ccInput}${mobile}` } })}
             className="w-full py-3 rounded-xl text-sm font-bold text-white" style={{ background: "#7B1C2E" }}>
             Register My Family →
           </button>
@@ -183,7 +197,7 @@ export default function OnboardingPage() {
           <div className="w-14 h-14 rounded-full flex items-center justify-center text-2xl mx-auto mb-3"
             style={{ background: "#FDE8EC" }}>📱</div>
           <h2 className="text-xl font-bold" style={{ color: "#5A1020" }}>Enter Your Mobile</h2>
-          <p className="text-sm" style={{ color: "#9B6060" }}>We'll use this to find your family</p>
+          <p className="text-sm" style={{ color: "#9B6060" }}>Welcome to Shree Visha Oswal Family</p>
         </div>
 
         {error && (
@@ -201,11 +215,11 @@ export default function OnboardingPage() {
         <button onClick={handleMobileSubmit}
           className="w-full py-3.5 rounded-xl text-sm font-bold text-white"
           style={{ background: "#7B1C2E" }}>
-          Find My Family →
+          Next→
         </button>
 
         <div className="text-center">
-          <button onClick={() => navigate("/registration")}
+          <button onClick={() => navigate("/registration", { state: { mobile: `${ccInput}${mobileInput}` } })}
             className="text-xs" style={{ color: "#C9A84C" }}>
             Skip — Register a new family instead
           </button>

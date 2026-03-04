@@ -85,25 +85,20 @@ export function ContactReorder({
 
   // ⭐ VALIDATION BEFORE SUBMIT
   function handleSubmit() {
-    if (items.length === 0) {
-      alert("Add at least one contact.");
-      return;
-    }
-
-    const selfCount = items.filter((c) => c.isSelf).length;
-
-    if (selfCount === 0) {
-      alert("Please select your contact (👤 Me).");
-      return;
-    }
-
-    if (selfCount > 1) {
-      alert("Only one contact can be marked as yourself.");
-      return;
-    }
-
-    onSubmit(items);
+  if (items.length === 0) {
+    alert("Add at least one contact.");
+    return;
   }
+
+  const hasSelf = items.some(c => c.isSelf);
+
+  // fallback safety
+  if (!hasSelf) {
+    items[0].isSelf = true;
+  }
+
+  onSubmit(items);
+}
 
   return (
     <div className="p-5 pb-8 flex flex-col gap-4">

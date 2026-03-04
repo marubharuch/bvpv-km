@@ -4,7 +4,8 @@ import { useContactPicker } from "../../hooks/useContactPicker";
 
 
 export function ContactCollector({ city, contacts, onAdd, onAddMany, onUpdate, onRemove, onConfirm, onBack }) {
-  const [showForm, setShowForm] = useState(false);
+  // If contacts already exist (pre-seeded), start with form hidden so confirm button is visible
+  const [showForm, setShowForm] = useState(contacts.length === 0);
   const [name, setName]         = useState("");
   const [phone, setPhone]       = useState("");
   const [err, setErr]           = useState("");
@@ -18,14 +19,18 @@ export function ContactCollector({ city, contacts, onAdd, onAddMany, onUpdate, o
 
   async function handlePick() {
     const picked = await pick();
-    if (picked.length) onAddMany(picked);
+    if (picked.length) {
+      onAddMany(picked);
+      setShowForm(false); // hide manual form so confirm button is visible
+    }
   }
 
   function submit() {
     if (!name.trim()) { setErr("Enter a name."); return; }
     if (!phone.trim()) { setErr("Enter a mobile number."); return; }
     onAdd(name, phone);
-    setName(""); setPhone(""); setErr(""); setShowForm(false);
+    setName(""); setPhone(""); setErr("");
+    setShowForm(false); // hide form after adding so confirm button is visible
   }
 
   function onKey(e) {
@@ -118,12 +123,14 @@ export function ContactCollector({ city, contacts, onAdd, onAddMany, onUpdate, o
             📱 {picking ? "Opening…" : "Pick from Phone"}
           </button>
         )}
-        <button
-          onClick={() => { setShowForm(true); setErr(""); }}
-          className="flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-2xl hover:border-gray-400 hover:bg-gray-50 transition"
-        >
-          + Add Manual
-        </button>
+        {!showForm && (
+  <button
+    onClick={() => { setShowForm(true); setErr(""); }}
+    className="flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-2xl hover:border-gray-400 hover:bg-gray-50 transition"
+  >
+    + Add Manual
+  </button>
+)}
       </div>
 
       {/* Confirm button */}

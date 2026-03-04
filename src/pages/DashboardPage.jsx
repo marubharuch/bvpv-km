@@ -7,7 +7,7 @@ import { getUserData } from "../services/userService";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import EditMemberModal from "../components/modals/EditMemberModal";
-import ImageUploadBox from "../components/ImageUploadBox";
+import ImageUploadBox from "../components/photo/PhotoUploadPro";
 import { Plus, RefreshCw, ChevronRight, Phone, MapPin, Pencil } from "lucide-react";
 import { loadCache, saveCache, invalidateCache } from "../utils/cache";
 

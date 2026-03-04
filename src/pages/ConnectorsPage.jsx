@@ -1,5 +1,5 @@
 /**
- * ConnectorsPage.jsx  — Tailwind v4
+ * ConnectorsPage.jsx  — Tailwind v4  (Mobile-optimized)
  * Rules:
  *  - Every user gets upload credit via myContacts (phone = key → self-dedup)
  *  - Invite list = ALL unregistered contacts (anyone's uploads)
@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useContext } from "react";
-import { ref, get, set } from "firebase/database";
+import { ref, get } from "firebase/database";
 import { batchWrite, updatePath } from "../services/rtdbService";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
@@ -23,11 +23,7 @@ function isValidName(n)  { return n.trim().split(/\s+/).length >= 2; }
 function uid()           { return Math.random().toString(36).slice(2, 10); }
 
 const CITIES = [
-  "Ahmedabad","Surat","Vadodara","Rajkot","Bhavnagar","Jamnagar",
-  "Gandhinagar","Anand","Nadiad","Mehsana","Palanpur","Patan",
-  "Surendranagar","Morbi","Junagadh","Amreli","Bharuch","Valsad",
-  "Navsari","Dahod","Godhra","Himatnagar","Modasa","Botad",
-  "Dwarka","Porbandar","Veraval","Sidhpur","Visnagar","Other"
+  "Borsad","Ahmedabad","Surat","Vadodara","Anand","Nadiad","Bharuch","Mumbai","NRI","Other"
 ];
 
 export default function ConnectorsPage() {
@@ -45,7 +41,8 @@ export default function ConnectorsPage() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteSending, setInviteSending] = useState(null);
   const [stats,         setStats]         = useState({ uploaded: 0, invited: 0, joined: 0 });
-const [showRules, setShowRules] = useState(false);
+  const [showRules,     setShowRules]     = useState(false);
+
   useEffect(() => { if (user?.uid) loadStats(); }, [user]);
 
   async function loadStats() {
@@ -65,6 +62,7 @@ const [showRules, setShowRules] = useState(false);
   }
 
   async function pickContacts() {
+    if (!user?.uid) return;   // guard: guest should never reach here
     if (!("contacts" in navigator) || !("ContactsManager" in window)) {
       alert("આ device Contact Picker support કરતું નથી. Chrome Mobile વાપરો.");
       return;
@@ -116,7 +114,7 @@ const [showRules, setShowRules] = useState(false);
       const updates = {};
 
       for (const c of selectedContacts) {
-        if (myContacts[c.phone]) continue; // self-duplicate → skip
+        if (myContacts[c.phone]) continue;
         updates[`users/${user.uid}/myContacts/${c.phone}`] = {
           name: c.name.trim(), phone: c.phone, city: c.city, addedAt: new Date().toISOString(),
         };
@@ -124,10 +122,10 @@ const [showRules, setShowRules] = useState(false);
         updates[`connectors/${c.phone}`] = {
           name: c.name.trim(), mobile: c.phone, city: c.city,
           uploadedAt:  existing?.uploadedAt  || now,
-          uploadedBy:  existing?.uploadedBy  || user.uid,   // ✅ FIX 1: credit the uploader
+          uploadedBy:  existing?.uploadedBy  || user.uid,
         };
         if (!existing) {
-          updates[`mobile_index/${c.phone}`] = {
+          updates[`mobileIndex/${c.phone}`] = {
             name: c.name.trim(), phone: c.phone, city: c.city,
             addedBy: user.uid, addedAt: new Date().toISOString(), memberId: null, userId: null,
           };
@@ -172,14 +170,14 @@ const [showRules, setShowRules] = useState(false);
     setInviteSending(contact.phone);
     const expiresAt  = Date.now() + 48 * 60 * 60 * 1000;
     const inviteData = { sentBy: user.uid, sentAt: new Date().toISOString(), expiresAt };
-    const inviteLink = `${window.location.origin}/register?ref=${user.uid}&phone=${contact.phone}`; // ✅ FIX 4: dynamic domain
+    const inviteLink = `${window.location.origin}/register?ref=${user.uid}&phone=${contact.phone}`;
     const message    = encodeURIComponent(
       `નમસ્તે ${contact.name}! 🙏\n\nઆપણી Community Directory App માં જોડાઓ.\nતમારી profile બનાવો અને સમાજ સાથે જોડાઓ. 👇\n\n${inviteLink}\n\n⏳ આ link 48 કલાક valid છે.`
     );
     try {
       await Promise.all([
         updatePath(`connectors/${contact.phone}`, { invitedBy: user.uid, invitedAt: Date.now(), invite: inviteData }),
-        updatePath(`mobile_index/${contact.phone}`, { invite: inviteData }),
+        updatePath(`mobileIndex/${contact.phone}`, { invite: inviteData }),
       ]);
       setInviteList(prev => prev.filter(c => c.phone !== contact.phone));
       await loadStats();
@@ -189,39 +187,53 @@ const [showRules, setShowRules] = useState(false);
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-10">
+    <div className="min-h-screen bg-slate-50" style={{ paddingBottom: "env(safe-area-inset-bottom, 16px)" }}>
 
       {/* ── HEADER ── */}
-      <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#0f4c81 100%)" }}
-        className="px-4 pt-5 pb-5">
-        <div className="max-w-lg mx-auto flex justify-between items-center">
-          <div>
-            <p className="text-xs font-bold tracking-widest text-blue-300 mb-1">OSWAL CONNECTORS</p>
-            <h1 className="text-3xl font-black text-white tracking-tight">Competition</h1>
+      <div
+        style={{
+          background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#0f4c81 100%)",
+          paddingTop: "max(env(safe-area-inset-top, 0px), 16px)",
+        }}
+        className="px-4 pb-4"
+      >
+        <div className="max-w-lg mx-auto">
+
+          {/* Top row: title + leaderboard btn */}
+          <div className="flex justify-between items-center mb-3">
+            <div>
+              <p className="text-[10px] font-bold tracking-widest text-blue-300 uppercase mb-0.5">Oswal Connectors</p>
+              <h1 className="text-2xl font-black text-white tracking-tight leading-none">Competition</h1>
+            </div>
+            <button
+              onClick={() => navigate("/leaderboard")}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-extrabold text-xs text-white cursor-pointer border-0 shrink-0"
+              style={{ background: "linear-gradient(135deg,#f59e0b,#ef4444)" }}
+            >
+              🏆 Leaderboard
+            </button>
           </div>
-          <div className="flex gap-2">
+
+          {/* Stats row — full width, evenly spaced */}
+          <div className="grid grid-cols-3 gap-2 mb-3">
             <StatPill icon="👥" label="Uploaded" value={stats.uploaded} color="#10b981" />
             <StatPill icon="📨" label="Invited"  value={stats.invited}  color="#f59e0b" />
             <StatPill icon="✅" label="Joined"   value={stats.joined}   color="#8b5cf6" />
           </div>
-        </div>
-        <div className="max-w-lg mx-auto mt-3 flex gap-2">
-          <button onClick={() => navigate("/leaderboard")}
-            className="flex-1 py-2.5 rounded-xl font-extrabold text-sm text-white cursor-pointer border-0"
-            style={{ background: "linear-gradient(135deg,#f59e0b,#ef4444)" }}>
-            🏆 Leaderboard
-          </button>
+
+          {/* Rules link — sits below stats, left-aligned */}
           <button
-  onClick={() => setShowRules(true)}
-  className="text-xs font-bold text-blue-400 underline ml-2"
->
-  📜 Rules
-</button>
+            onClick={() => setShowRules(true)}
+            className="text-xs font-bold text-blue-300 underline underline-offset-2 bg-transparent border-0 cursor-pointer p-0"
+          >
+            📜 સ્પર્ધાના નિયમો જુઓ
+          </button>
+
         </div>
       </div>
 
       {/* ── TABS ── */}
-      <div className="sticky top-0 z-10 bg-white border-b-2 border-gray-100">
+      <div className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-lg mx-auto flex">
           {[
             { key: "add",    label: "📱 Contacts ઉમેરો" },
@@ -229,24 +241,54 @@ const [showRules, setShowRules] = useState(false);
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex-1 py-3.5 text-sm font-bold cursor-pointer border-0 bg-transparent transition-colors
-                ${tab === t.key ? "text-blue-800 border-b-[3px] border-blue-800 -mb-0.5" : "text-gray-400"}`}>
+                ${tab === t.key
+                  ? "text-blue-800 border-b-[3px] border-blue-800 -mb-px"
+                  : "text-gray-400"}`}>
               {t.label}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 pt-4">
+      <div className="max-w-lg mx-auto px-4 pt-4 pb-6">
 
         {/* ── TAB 1: ADD CONTACTS ── */}
         {tab === "add" && (
           <div>
-            <button onClick={pickContacts}
-              className="w-full flex items-center gap-4 px-5 py-5 rounded-2xl border-2 border-dashed border-blue-700 bg-blue-50 text-blue-800 font-bold text-left cursor-pointer mb-5">
-              <span className="text-2xl">📲</span>
+            {/* Guest banner */}
+            {!user?.uid && (
+              <div className="flex items-start gap-3 px-4 py-4 rounded-2xl mb-4"
+                style={{ background: "#fff7ed", border: "1.5px solid #fb923c" }}>
+                <span className="text-2xl flex-shrink-0">🔒</span>
+                <div>
+                  <p className="text-sm font-bold" style={{ color: "#9a3412" }}>Login જરૂરી છે</p>
+                  <p className="text-xs leading-relaxed mt-1 mb-2" style={{ color: "#c2410c" }}>
+                    Contacts upload કરવા માટે પહેલા પરિવાર રજીસ્ટ્રેશન કરો અથવા Login કરો.
+                  </p>
+                  <button
+                    onClick={() => navigate("/registration")}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg border-0 cursor-pointer"
+                    style={{ background: "#ea580c", color: "#fff" }}>
+                    રજીસ્ટ્રેશન કરો →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={pickContacts}
+              disabled={!user?.uid}
+              className="w-full flex items-center gap-4 px-5 py-5 rounded-2xl border-2 border-dashed font-bold text-left mb-5 transition-transform"
+              style={user?.uid
+                ? { borderColor: "#1d4ed8", background: "#eff6ff", color: "#1e40af", cursor: "pointer" }
+                : { borderColor: "#d1d5db", background: "#f9fafb", color: "#9ca3af", cursor: "not-allowed", opacity: 0.55 }
+              }>
+              <span className="text-3xl">{user?.uid ? "📲" : "🔒"}</span>
               <div>
                 <div className="text-base font-extrabold">Contact Picker ખોલો</div>
-                <div className="text-xs opacity-70 mt-0.5">Phone book માંથી contacts select કરો</div>
+                <div className="text-xs opacity-70 mt-0.5">
+                  {user?.uid ? "Phone book માંથી contacts select કરો" : "Login પછી ઉપલબ્ધ"}
+                </div>
               </div>
             </button>
 
@@ -255,53 +297,65 @@ const [showRules, setShowRules] = useState(false);
                 <div className="flex justify-between items-center mb-3">
                   <span className="text-sm font-bold text-gray-700">{picked.length} contacts picked</span>
                   <button onClick={selectAll}
-                    className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg border-0 cursor-pointer">
+                    className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg border-0 cursor-pointer active:scale-95 transition-transform">
                     ✅ બધા select ({validContacts.length})
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-2.5 mb-4">
+                <div className="flex flex-col gap-3 mb-4">
                   {picked.map(c => {
                     const valid     = isValidName(c.name) && c.city;
                     const isChecked = !!selected[c.id];
                     return (
                       <div key={c.id}
-                        className={`rounded-2xl border-2 px-3.5 py-3 transition-all
-                          ${isChecked ? "border-emerald-400 bg-emerald-50"
-                            : valid    ? "border-gray-200 bg-white"
-                            :            "border-amber-200 bg-white"}`}>
-                        <div className="flex items-center gap-2.5">
-                          <input type="checkbox" checked={isChecked} disabled={!valid}
+                        className={`rounded-2xl border-2 px-3 py-3 transition-all
+                          ${isChecked
+                            ? "border-emerald-400 bg-emerald-50"
+                            : valid
+                            ? "border-gray-200 bg-white"
+                            : "border-amber-200 bg-white"}`}>
+
+                        {/* Row 1: checkbox + name input + remove */}
+                        <div className="flex items-center gap-2 mb-2">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={!valid}
                             onChange={() => toggleSelect(c.id)}
-                            className="w-5 h-5 cursor-pointer shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <input
-                              className={`w-full px-2.5 py-2 rounded-lg border-[1.5px] text-sm font-bold outline-none mb-1
-                                ${isValidName(c.name) ? "border-emerald-200" : "border-amber-300"}`}
-                              value={c.name}
-                              onChange={e => updateName(c.id, e.target.value)}
-                              placeholder="પૂરું નામ (ઓછામાં ઓછા 2 words)"
-                              style={{ fontSize: 16 }}
-                            />
-                            <p className="text-xs text-gray-500 font-semibold">📞 {c.phone}</p>
-                          </div>
-                          <div className="flex flex-col gap-1.5 items-end shrink-0">
-                            <button onClick={() => openCityPopup(c.id)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border-0 cursor-pointer whitespace-nowrap
-                                ${c.city ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                              {c.city || "📍 City"}
-                            </button>
-                            <button onClick={() => removeContact(c.id)}
-                              className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs font-black border-0 cursor-pointer flex items-center justify-center">
-                              ✕
-                            </button>
-                          </div>
+                            className="w-5 h-5 cursor-pointer shrink-0 accent-emerald-600"
+                          />
+                          <input
+                            className={`flex-1 min-w-0 px-3 py-2 rounded-lg border-[1.5px] text-sm font-bold outline-none
+                              ${isValidName(c.name) ? "border-emerald-200 bg-white" : "border-amber-300 bg-amber-50"}`}
+                            value={c.name}
+                            onChange={e => updateName(c.id, e.target.value)}
+                            placeholder="પૂરું નામ (2 words)"
+                            style={{ fontSize: 16 }}
+                          />
+                          <button
+                            onClick={() => removeContact(c.id)}
+                            className="w-7 h-7 rounded-full bg-red-100 text-red-500 text-xs font-black border-0 cursor-pointer flex items-center justify-center shrink-0 active:bg-red-200">
+                            ✕
+                          </button>
                         </div>
+
+                        {/* Row 2: phone + city button */}
+                        <div className="flex items-center justify-between pl-7 gap-2">
+                          <p className="text-xs text-gray-500 font-semibold">📞 {c.phone}</p>
+                          <button
+                            onClick={() => openCityPopup(c.id)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border-0 cursor-pointer whitespace-nowrap active:scale-95 transition-transform
+                              ${c.city ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                            {c.city || "📍 City select કરો"}
+                          </button>
+                        </div>
+
+                        {/* Warnings */}
                         {!isValidName(c.name) && (
-                          <p className="text-xs text-amber-600 font-semibold mt-1.5 pl-8">⚠️ ઓછામાં ઓછા 2 words નું નામ લખો</p>
+                          <p className="text-xs text-amber-600 font-semibold mt-1.5 pl-7">⚠️ ઓછામાં ઓછા 2 words નું નામ</p>
                         )}
                         {!c.city && isValidName(c.name) && (
-                          <p className="text-xs text-amber-600 font-semibold mt-1.5 pl-8">📍 City select કરો</p>
+                          <p className="text-xs text-amber-600 font-semibold mt-1.5 pl-7">📍 City select કરો</p>
                         )}
                       </div>
                     );
@@ -309,8 +363,10 @@ const [showRules, setShowRules] = useState(false);
                 </div>
 
                 {selectedContacts.length > 0 && (
-                  <button onClick={handleSubmit} disabled={submitting}
-                    className={`w-full py-4 rounded-2xl text-white text-base font-black border-0 cursor-pointer mt-1 transition-opacity
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting}
+                    className={`w-full py-4 rounded-2xl text-white text-base font-black border-0 cursor-pointer transition-opacity active:scale-[0.98]
                       ${submitting ? "opacity-60" : ""}`}
                     style={{ background: "linear-gradient(135deg,#0f4c81,#1e3a5f)", boxShadow: "0 4px 20px rgba(15,76,129,0.35)" }}>
                     {submitting ? "⏳ Uploading..." : `✅ ${selectedContacts.length} Contacts Submit કરો`}
@@ -318,7 +374,7 @@ const [showRules, setShowRules] = useState(false);
                 )}
 
                 {submitDone && (
-                  <div className="mt-3 px-5 py-3.5 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-sm text-center border-2 border-emerald-400">
+                  <div className="mt-3 px-5 py-4 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-sm text-center border-2 border-emerald-400">
                     🎉 Contacts successfully ઉમેરાઈ ગયા!
                   </div>
                 )}
@@ -341,20 +397,21 @@ const [showRules, setShowRules] = useState(false);
         {/* ── TAB 2: INVITE ── */}
         {tab === "invite" && (
           <div>
-            <div className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border-2 border-gray-100 mb-4">
+            <div className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
               <span className="text-xl">📲</span>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-gray-800">Personal WhatsApp Invite</p>
-                <p className="text-xs text-gray-500 mt-0.5">બધા unregistered contacts • Invite 48 કલાક valid</p>
+                <p className="text-xs text-gray-500 mt-0.5 truncate">Unregistered contacts • 48 કલાક valid</p>
               </div>
-              <button onClick={loadInviteList}
-                className="bg-gray-100 border-0 rounded-lg px-2.5 py-1.5 cursor-pointer text-base">
+              <button
+                onClick={loadInviteList}
+                className="bg-gray-100 border-0 rounded-lg px-3 py-2 cursor-pointer text-base active:bg-gray-200 shrink-0">
                 🔄
               </button>
             </div>
 
             {inviteLoading && (
-              <div className="text-center py-8 text-gray-500 font-semibold">⏳ List load થઈ રહ્યું છે...</div>
+              <div className="text-center py-12 text-gray-500 font-semibold">⏳ List load થઈ રહ્યું છે...</div>
             )}
 
             {!inviteLoading && inviteList.length === 0 && (
@@ -370,12 +427,13 @@ const [showRules, setShowRules] = useState(false);
 
             {!inviteLoading && inviteList.length > 0 && (
               <div>
-                <p className="text-sm font-bold text-gray-700 mb-3">{inviteList.length} contacts available</p>
+                <p className="text-sm font-bold text-gray-600 mb-3">{inviteList.length} contacts available</p>
                 <div className="flex flex-col gap-2.5">
                   {inviteList.map(c => (
                     <div key={c.phone}
-                      className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border-2 border-gray-100">
-                      <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-black text-lg shrink-0"
+                      className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border border-gray-200 shadow-sm">
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-base shrink-0"
                         style={{ background: "linear-gradient(135deg,#0f4c81,#10b981)" }}>
                         {c.name?.charAt(0)?.toUpperCase() || "?"}
                       </div>
@@ -384,11 +442,15 @@ const [showRules, setShowRules] = useState(false);
                         <p className="text-xs text-gray-500 font-semibold">📞 {c.phone}</p>
                         {c.city && <p className="text-xs text-gray-400">📍 {c.city}</p>}
                       </div>
-                      <button onClick={() => sendInvite(c)} disabled={inviteSending === c.phone}
-                        className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-white font-extrabold text-sm border-0 cursor-pointer shrink-0 transition-opacity
+                      <button
+                        onClick={() => sendInvite(c)}
+                        disabled={inviteSending === c.phone}
+                        className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-white font-extrabold text-sm border-0 cursor-pointer shrink-0 transition-opacity active:scale-95
                           ${inviteSending === c.phone ? "opacity-60" : ""}`}
-                        style={{ background: "#25d366" }}>
-                        {inviteSending === c.phone ? "⏳" : <><span className="text-lg">💬</span> Invite</>}
+                        style={{ background: "#25d366", minWidth: 80 }}>
+                        {inviteSending === c.phone
+                          ? <span>⏳</span>
+                          : <><span className="text-base">💬</span> Invite</>}
                       </button>
                     </div>
                   ))}
@@ -401,29 +463,41 @@ const [showRules, setShowRules] = useState(false);
 
       {/* ── CITY POPUP ── */}
       {cityTarget !== null && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center"
-          style={{ background: "rgba(0,0,0,0.5)" }}
-          onClick={() => setCityTarget(null)}>
-          <div className="bg-white rounded-t-3xl w-full max-w-lg flex flex-col px-4 pt-5 pb-8"
-            style={{ maxHeight: "70vh" }}
-            onClick={e => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.55)" }}
+          onClick={() => setCityTarget(null)}
+        >
+          <div
+            className="bg-white rounded-t-3xl w-full max-w-lg flex flex-col px-4 pt-5"
+            style={{
+              maxHeight: "75vh",
+              paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)",
+            }}
+            onClick={e => e.stopPropagation()}
+          >
             <div className="flex justify-between items-center mb-4">
               <span className="text-base font-extrabold text-gray-800">📍 City Select કરો</span>
-              <button onClick={() => setCityTarget(null)}
-                className="w-8 h-8 rounded-full bg-gray-100 border-0 cursor-pointer text-base font-black text-gray-600">
+              <button
+                onClick={() => setCityTarget(null)}
+                className="w-9 h-9 rounded-full bg-gray-100 border-0 cursor-pointer text-base font-black text-gray-600 flex items-center justify-center">
                 ✕
               </button>
             </div>
-            <input className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 text-sm outline-none mb-4"
+            <input
+              className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 text-sm outline-none mb-4 focus:border-blue-400"
               placeholder="Search city..."
               value={citySearch}
               onChange={e => setCitySearch(e.target.value)}
               style={{ fontSize: 16 }}
-              autoFocus />
-            <div className="grid grid-cols-3 gap-2 overflow-y-auto">
+              autoFocus
+            />
+            <div className="grid grid-cols-3 gap-2 overflow-y-auto pb-2">
               {filteredCities.map(city => (
-                <button key={city} onClick={() => selectCity(city)}
-                  className="py-2.5 px-2 rounded-xl border-2 border-gray-200 bg-gray-50 text-sm font-bold text-gray-800 cursor-pointer text-center hover:bg-blue-50 hover:border-blue-200 transition-colors">
+                <button
+                  key={city}
+                  onClick={() => selectCity(city)}
+                  className="py-3 px-2 rounded-xl border-2 border-gray-200 bg-gray-50 text-sm font-bold text-gray-800 cursor-pointer text-center active:bg-blue-50 active:border-blue-300 transition-colors">
                   {city}
                 </button>
               ))}
@@ -431,78 +505,101 @@ const [showRules, setShowRules] = useState(false);
           </div>
         </div>
       )}
+
+      {/* ── RULES MODAL ── */}
       {showRules && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-    <div className="max-w-lg w-full rounded-2xl p-5"
-      style={{
-        background: "#0f172a",
-        border: "1px solid #334155",
-        maxHeight: "85vh",
-        overflowY: "auto"
-      }}>
-
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-black text-white">📜 સ્પર્ધાના નિયમો</h2>
-        <button
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.75)" }}
           onClick={() => setShowRules(false)}
-          className="text-slate-400 hover:text-white text-lg font-bold"
         >
-          ✕
-        </button>
-      </div>
+          <div
+            className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl flex flex-col"
+            style={{
+              background: "#0f172a",
+              border: "1px solid #1e3a5f",
+              maxHeight: "88vh",
+              paddingBottom: "max(env(safe-area-inset-bottom, 0px), 20px)",
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex justify-between items-center px-5 pt-5 pb-4 border-b border-slate-700">
+              <h2 className="text-lg font-black text-white">📜 સ્પર્ધાના નિયમો</h2>
+              <button
+                onClick={() => setShowRules(false)}
+                className="w-9 h-9 rounded-full bg-slate-700 border-0 cursor-pointer text-slate-300 font-bold flex items-center justify-center text-base active:bg-slate-600">
+                ✕
+              </button>
+            </div>
 
-      <div className="text-sm text-slate-300 space-y-4 leading-relaxed">
+            {/* Modal body — scrollable */}
+            <div className="overflow-y-auto px-5 py-4">
+              <div className="text-sm text-slate-300 space-y-5 leading-relaxed">
 
-        <div>
-          <p className="font-bold text-amber-400 mb-1">1️⃣ Upload Award</p>
-          <ul className="list-disc ml-5 space-y-1">
-            <li> માત્ર સમાજના વ્યક્તિઓના જ કોન્ટેક્ટ અપલોડ કરી શકશે.</li>
+                <div>
+                  <p className="font-bold text-amber-400 mb-2 text-base">1️⃣ Upload Award</p>
+                  <ul className="space-y-2.5 ml-1">
+                    {[
+                      "માત્ર સમાજના વ્યક્તિઓના જ કોન્ટેક્ટ અપલોડ કરી શકશે.",
+                      "એક જ કોન્ટેક્ટ એકથી વધુ વખત અપલોડ કરવામાં આવશે તો તે ફક્ત એક જ વખત ગણાશે.",
+                      "દરેક કોન્ટેક્ટ માટે યોગ્ય અને સંપૂર્ણ નામ તથા શહેર (City) નોંધાયેલું હોવું ફરજિયાત છે. અધૂરી માહિતી ધરાવતા કોન્ટેક્ટ માન્ય ગણાશે નહીં.",
+                      "સ્પર્ધાની અંતિમ તારીખ સુધીમાં જે કોન્ટેક્ટ સફળતાપૂર્વક રજીસ્ટ્રેશન કરશે, તે જ કોન્ટેક્ટ માન્ય ગણાશે.",
+                    ].map((text, i) => (
+                      <li key={i} className="flex gap-2.5">
+                        <span className="text-amber-400 shrink-0 mt-0.5">•</span>
+                        <span>{text}</span>
+                      </li>
+                    ))}
+                    <li className="flex gap-2.5">
+                      <span className="text-amber-400 shrink-0 mt-0.5">•</span>
+                      <span>
+                        <strong className="text-slate-200">ઉદાહરણ:</strong> જો 50 contacts અપલોડ કર્યા હોય અને 40 લોકોએ રજીસ્ટ્રેશન કર્યું હોય, તો ફક્ત 40 ગણાશે.
+                      </span>
+                    </li>
+                  </ul>
+                </div>
 
-<li>એક જ કોન્ટેક્ટ એકથી વધુ વખત (એકસાથે અથવા અલગ-અલગ સમયે) અપલોડ કરવામાં આવશે તો  તે ફક્ત એક જ વખત ગણાશે. </li>
-<li>
-દરેક કોન્ટેક્ટ માટે યોગ્ય અને સંપૂર્ણ નામ તથા શહેર (City) નોંધાયેલું હોવું ફરજિયાત છે. અધૂરી માહિતી ધરાવતા કોન્ટેક્ટ માન્ય ગણાશે નહીં.</li>
+                <div>
+                  <p className="font-bold text-blue-400 mb-2 text-base">2️⃣ Invite Award</p>
+                  <ul className="space-y-2.5 ml-1">
+                    {[
+                      "ઇન્વિટેશન પ્રક્રિયા 21 માર્ચથી શરૂ થશે.",
+                      "ઇન્વિટેશન પેજ પર તે તમામ કોન્ટેક્ટ દેખાશે, જે અપલોડ થયા છે પણ રજીસ્ટ્રેશન કર્યું નથી.",
+                      "યુઝર પોતાના ઓળખાણના કોન્ટેક્ટને ઇન્વાઇટ કરી શકશે.",
+                      "અંતિમ તારીખ સુધી ઇન્વાઇટ કરેલા contacts માંથી જેટલા register કર્યા, તે સ્પર્ધા માટે ગણાશે.",
+                    ].map((text, i) => (
+                      <li key={i} className="flex gap-2.5">
+                        <span className="text-blue-400 shrink-0 mt-0.5">•</span>
+                        <span>{text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
 
-<li>સ્પર્ધાની અંતિમ તારીખ સુધીમાં જે કોન્ટેક્ટ એપ પર આવીને સફળતાપૂર્વક રજીસ્ટ્રેશન કરશે, તે જ કોન્ટેક્ટ માન્ય ગણાશે.</li>
+                <div className="text-xs text-slate-400 pt-3 border-t border-slate-700">
+                  🎯 હેતુ: સમાજના દરેક સભ્યને platform સાથે જોડવાનો.
+                </div>
 
-<li>ઉદાહરણરૂપે:<br/>
-
-જો તમે 50 કોન્ટેક્ટ અપલોડ કર્યા હોય અને તેમાંમાંથી 40 લોકોએ અંતિમ તારીખ પહેલાં રજીસ્ટ્રેશન કર્યું હોય, તો ફક્ત તે 40 કોન્ટેક્ટ જ સ્પર્ધા માટે માન્ય ગણાશે.</li>
-          </ul>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <div>
-          <p className="font-bold text-blue-400 mb-1">2️⃣ Invite Award</p>
-          <ul className="list-disc ml-5 space-y-1">
-      <li>ઇન્વિટેશન પ્રક્રિયા 21 માર્ચથી શરૂ થશે.</li>  
-
-<li>ઇન્વિટેશન પેજ પર તે તમામ કોન્ટેક્ટનું લિસ્ટ જોવા મળશે, જે તમે અથવા અન્ય લોકોએ અપલોડ કર્યા છે પરંતુ હજુ સુધી રજીસ્ટ્રેશન કર્યું નથી.</li>
-
-<li>યુઝર પોતાના ઓળખાણના કોન્ટેક્ટને ઇન્વાઇટ કરી શકશે.</li>
-
-<li>સ્પર્ધાની અંતિમ તારીખ સુધીમાં ઇન્વાઇટ કરેલા કોન્ટેક્ટમાંથી જેટલા લોકોએ રજીસ્ટ્રેશન કર્યું હશે, તે સંખ્યા સ્પર્ધા માટે ગણવામાં આવશે.</li>
-</ul>
-        </div>
-
-        <div className="text-xs text-slate-400 pt-2 border-t border-slate-700">
-          🎯 હેતુ: સમાજના દરેક સભ્યને પ્લેટફોર્મ સાથે જોડવાનો.
-        </div>
-
-      </div>
-    </div>
-  </div>
-)}
+      )}
     </div>
   );
 }
 
 function StatPill({ icon, label, value, color }) {
   return (
-    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border min-w-[60px]"
-      style={{ background: "rgba(255,255,255,0.08)", borderColor: color }}>
-      <span className="text-sm">{icon}</span>
-      <div>
-        <div className="text-base font-black leading-none" style={{ color }}>{value}</div>
-        <div className="text-[10px] text-gray-400 mt-0.5">{label}</div>
+    <div
+      className="flex items-center gap-2 px-3 py-2.5 rounded-xl border w-full"
+      style={{ background: "rgba(255,255,255,0.08)", borderColor: color + "66" }}
+    >
+      <span className="text-base leading-none">{icon}</span>
+      <div className="min-w-0">
+        <div className="text-lg font-black leading-none" style={{ color }}>{value}</div>
+        <div className="text-[10px] text-gray-400 mt-0.5 truncate">{label}</div>
       </div>
     </div>
   );

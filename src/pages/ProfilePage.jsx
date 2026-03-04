@@ -1,45 +1,59 @@
 /**
- * ProfilePage.jsx
- * ─────────────────────────────────────────────
- * Refactored: uses familyService.updateFamilyPin()
- * instead of direct Firebase writes.
+ * pages/ProfilePage.jsx
+ * FIX BUG 4: Members uses getFamilyWithMembers() - real member objects not booleans
+ * FIX BUG 6: Removed ghost familyContacts section
+ * FIX BUG 8: PIN regeneration uses generateUniquePin()
  */
-
 import { useEffect, useState } from "react";
 import { getAuth, signOut } from "firebase/auth";
 import { ref, get } from "firebase/database";
 import { db } from "../firebase";
-import { updateFamilyPin } from "../services/familyService";
+import { updateFamilyPin, getFamilyWithMembers } from "../services/familyService";
+import { generateUniquePin } from "../services/familyRegistrationService";
 
 export default function ProfilePage() {
   const [familyId, setFamilyId] = useState(null);
   const [family,   setFamily]   = useState(null);
+  const [members,  setMembers]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
 
   useEffect(() => {
     const loadFamily = async () => {
       const user = getAuth().currentUser;
-      if (!user) return;
+      if (!user) { setLoading(false); return; }
 
       const uidSnap = await get(ref(db, `users/${user.uid}/familyId`));
-      if (!uidSnap.exists()) return;
+      if (!uidSnap.exists()) { setLoading(false); return; }
 
       const famId = uidSnap.val();
       setFamilyId(famId);
 
-      const famSnap = await get(ref(db, `families/${famId}`));
-      if (famSnap.exists()) setFamily(famSnap.val());
+      // FIX BUG 4: use getFamilyWithMembers which returns real member documents
+      const famWithMembers = await getFamilyWithMembers(famId);
+      if (famWithMembers) {
+        const { members: memberList, ...famData } = famWithMembers;
+        setFamily(famData);
+        setMembers(Array.isArray(memberList) ? memberList : []);
+      }
+      setLoading(false);
     };
-
     loadFamily();
   }, []);
 
-  if (!family) return <p className="p-4">Loading...</p>;
+  if (loading) return <p className="p-4">Loading...</p>;
+  if (!family) return <p className="p-4">No family found.</p>;
 
   const regeneratePin = async () => {
-    const newPin = String(Math.floor(1000 + Math.random() * 9000));
-    await updateFamilyPin(familyId, newPin, String(family.familyPin));
-    setFamily({ ...family, familyPin: newPin });
-    alert("PIN updated");
+    try {
+      // FIX BUG 8: generateUniquePin prevents collisions with other families
+      const newPin = await generateUniquePin();
+      await updateFamilyPin(familyId, newPin, String(family.familyPin));
+      setFamily({ ...family, familyPin: newPin });
+      alert("PIN updated successfully");
+    } catch (e) {
+      console.error("PIN regen failed:", e);
+      alert("Failed to regenerate PIN. Please try again.");
+    }
   };
 
   const logout = async () => {
@@ -50,9 +64,9 @@ export default function ProfilePage() {
   return (
     <div className="max-w-md mx-auto p-4 space-y-4">
 
-      {/* Family Info */}
       <div className="bg-white p-4 rounded shadow">
         <h2 className="text-lg font-bold mb-2">Family Profile</h2>
+        <p className="text-sm text-gray-600">City: <span className="font-semibold">{family.city || "—"}</span></p>
         <p className="text-sm text-gray-600">
           Family PIN: <span className="font-semibold">{family.familyPin}</span>
         </p>
@@ -91,32 +105,35 @@ export default function ProfilePage() {
         </button>
       </div>
 
-      {/* Family Contacts */}
+      {/* FIX BUG 4: real member documents via getFamilyWithMembers() */}
       <div className="bg-white p-4 rounded shadow">
-        <h3 className="font-semibold mb-2">Family Contacts</h3>
-        {family.familyContacts?.map((c, i) => (
-          <div key={i} className="border-b py-2">
-            <p className="font-medium">{c.name}</p>
-            <p className="text-sm text-gray-600">{c.phone} • {c.relation}</p>
+        <h3 className="font-semibold mb-2">Family Members ({members.length})</h3>
+        {members.length === 0 && (
+          <p className="text-sm text-gray-400">No members linked yet.</p>
+        )}
+        {members.map((m) => (
+          <div key={m.id} className="border-b py-2 text-sm flex items-center gap-2">
+            {m.photoURL && (
+              <img src={m.photoURL} alt={m.name} className="w-8 h-8 rounded-full object-cover" />
+            )}
+            <div>
+              <p className="font-semibold text-gray-800">{m.name || "—"}</p>
+              <p className="text-xs text-gray-500">
+                {m.mobile || ""}{m.email ? ` · ${m.email}` : ""}
+              </p>
+            </div>
+            {m.isHead && (
+              <span className="ml-auto text-xs bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded">
+                Head
+              </span>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Members */}
-      <div className="bg-white p-4 rounded shadow">
-        <h3 className="font-semibold mb-2">Joined Members</h3>
-        {Object.values(family.members || {}).map((m, i) => (
-          <div key={i} className="border-b py-2 text-sm">
-            {m.email} ({m.role})
-          </div>
-        ))}
-      </div>
+      {/* FIX BUG 6: familyContacts section removed — field does not exist in schema/RTDB */}
 
-      {/* Actions */}
       <div className="space-y-2">
-        <button className="w-full bg-gray-200 p-2 rounded">
-          Edit Family Details
-        </button>
         <button onClick={logout} className="w-full bg-red-500 text-white p-2 rounded">
           Logout
         </button>
