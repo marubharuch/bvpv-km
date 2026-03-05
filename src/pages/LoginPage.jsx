@@ -6,7 +6,6 @@ import {
   GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail,
 } from "firebase/auth";
 import { ensureUser } from "../db/userDb";
-import { getUser }    from "../db/userDb";
 import { toFullMobile } from "../lib/phone";
 import { COLORS }     from "../constants/app";
 import MobileInput    from "../components/ui/MobileInput";
@@ -33,25 +32,11 @@ export default function LoginPage() {
   const [err,  setErr]  = useState("");
   const [busy, setBusy] = useState(false);
 
-  // After login: check if user already has family → go to dashboard directly
-  const afterLogin = async (firebaseUser) => {
-    try {
-      const userData = await getUser(firebaseUser.uid, firebaseUser.email);
-      if (userData?.familyId) {
-        navigate("/dashboard", { replace: true });
-      } else {
-        navigate("/registration", { replace: true });
-      }
-    } catch {
-      navigate("/onboarding", { replace: true });
-    }
-  };
-
   const go = async fn => {
     setBusy(true); setErr("");
     try {
-      const cred = await fn();
-      await afterLogin(cred.user);
+      await fn();
+      // Navigation is handled by the useEffect above watching AuthContext user state
     } catch (e) {
       setErr(e.message.replace("Firebase: ", "").replace(/\(.*\)/, "").trim());
     } finally {
