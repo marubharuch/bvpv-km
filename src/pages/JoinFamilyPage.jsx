@@ -1,12 +1,12 @@
 // pages/JoinFamilyPage.jsx
-import { useState, useContext }   from "react";
+import { useState }               from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth }                from "../store/AuthContext";
 import { rtdb }                   from "../db/rtdb";
 import { linkUserToFamily }       from "../db/userDb";
 import { memberDoc }              from "../db/schema";
-import { toMobileKey, toFullMobile } from "../lib/phone";
 import { COLORS }                 from "../constants/app";
+import PinInput                   from "../components/ui/PinInput";
 
 export default function JoinFamilyPage() {
   const { user }         = useAuth();
@@ -39,18 +39,16 @@ export default function JoinFamilyPage() {
       let memberId  = userData.memberId || null;
 
       if (!memberId) {
-        const mob10 = toMobileKey(userData.mobile || "");
         memberId = `MEM_${ts}`;
         await rtdb.set(`members/${memberId}`, memberDoc({
-          name:     user.displayName || user.email || "Member",
-          mobile:   mob10,
-          fullMobile: userData.mobile || "",
+          name:        user.displayName || user.email || "Member",
+          mobile:      userData.mobile      || "",
           countryCode: userData.countryCode || "+91",
-          email:    user.email || "",
-          photoURL: user.photoURL || "",
-          isSelf:   true,
+          email:       user.email           || "",
+          photoURL:    user.photoURL        || "",
+          isSelf:      true,
           familyId,
-          createdAt: ts,
+          createdAt:   ts,
         }));
       }
 
@@ -77,15 +75,11 @@ export default function JoinFamilyPage() {
         <h2 className="text-lg font-bold" style={{ color: COLORS.primaryDark }}>Join Family</h2>
         <p className="text-sm" style={{ color: COLORS.textSecondary }}>Enter the 4-digit family PIN</p>
       </div>
-      <input type="number" placeholder="4-digit PIN" value={pin}
-        onChange={e => setPin(e.target.value)} maxLength={4} disabled={busy}
-        className="w-full border-2 rounded-xl px-4 py-3 text-center text-2xl font-bold outline-none"
-        style={{ borderColor: COLORS.border, color: COLORS.textPrimary, fontSize: 24 }} />
-      {err && <p className="text-xs text-center font-semibold" style={{ color: COLORS.error }}>{err}</p>}
-      <button onClick={handleJoin} disabled={busy}
+      <PinInput value={pin} onChange={setPin} onSubmit={handleJoin} error={err} />
+      <button onClick={handleJoin} disabled={busy || pin.trim().length !== 4}
         className="w-full py-3.5 rounded-xl text-sm font-bold text-white disabled:opacity-50"
         style={{ background: COLORS.primary }}>
-        {busy ? "Joining..." : "Join"}
+        {busy ? "Joining…" : "Join Family →"}
       </button>
     </div>
   );

@@ -34,15 +34,32 @@ export async function ensureUser(firebaseUser, extra = {}) {
     }
     await rtdb.batch(writes);
 
-  } else if (full && !existing.mobile) {
+  } else {
+    // User node exists — patch any missing fields without overwriting existing data
     const writes = {};
-    writes[`users/${firebaseUser.uid}/mobile`]      = full;
-    writes[`users/${firebaseUser.uid}/countryCode`] = cc;
-    Object.assign(writes, buildMobileIndexWrites(full, cc, {
-      isUser: true, userUid: firebaseUser.uid,
-    }));
-    await rtdb.batch(writes);
+    if (displayName && !existing.displayName)
+      writes[`users/${firebaseUser.uid}/displayName`] = displayName;
+    if (full && !existing.mobile) {
+      writes[`users/${firebaseUser.uid}/mobile`]      = full;
+      writes[`users/${firebaseUser.uid}/countryCode`] = cc;
+      Object.assign(writes, buildMobileIndexWrites(full, cc, {
+        isUser: true, userUid: firebaseUser.uid,
+      }));
+    }
+    if (Object.keys(writes).length) await rtdb.batch(writes);
   }
+}
+
+/** Save mobile to an existing user node (called after mobile prompt). */
+export async function saveUserMobile(uid, fullMobile, countryCode = "+91") {
+  if (!uid || !fullMobile) return;
+  const writes = {};
+  writes[`users/${uid}/mobile`]      = fullMobile;
+  writes[`users/${uid}/countryCode`] = countryCode;
+  Object.assign(writes, buildMobileIndexWrites(fullMobile, countryCode, {
+    isUser: true, userUid: uid,
+  }));
+  await rtdb.batch(writes);
 }
 
 /** Fetch user data. Falls back to email-key for old records. */

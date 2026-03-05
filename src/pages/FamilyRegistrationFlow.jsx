@@ -4,7 +4,7 @@ import { useNavigate }           from "react-router-dom";
 import { useAuth }               from "../store/AuthContext";
 import { registerFamily }        from "../db/registrationDb";
 import { getMobileIndex }        from "../db/mobileIndexDb";
-import { linkUserToFamily }      from "../db/userDb";
+import { linkUserToFamily, saveUserMobile } from "../db/userDb";  
 import { rtdb }                  from "../db/rtdb";
 import { memberDoc }             from "../db/schema";
 import { toFullMobile, splitMobile } from "../lib/phone";
@@ -89,9 +89,8 @@ function MobilePromptSheet({ user, onFound, onNotFound, onSkip }) {
             <p className="font-bold text-sm" style={{ color: COLORS.primaryDark }}>
               Welcome, {user.displayName?.split(" ")[0] || "there"}! 🙏
             </p>
-            You can change name Later
             <p className="text-xs" style={{ color: COLORS.textSecondary }}>
-              Enter your mobile  
+              Enter your mobile to find your family
             </p>
           </div>
         </div>
@@ -122,7 +121,7 @@ function MobilePromptSheet({ user, onFound, onNotFound, onSkip }) {
         <button onClick={handleCheck} disabled={busy || !rawInput.trim()}
           className="w-full py-3.5 rounded-2xl text-sm font-extrabold text-white disabled:opacity-50"
           style={{ background: COLORS.primary }}>
-          {busy ? "Checking…" : "Next →"}
+          {busy ? "Checking…" : "Find My Family →"}
         </button>
 
         <button onClick={onSkip}
@@ -224,7 +223,7 @@ function MobileFamilyPinScreen({ familyId, mobile, user, onSuccess, onRegisterNe
 export default function FamilyRegistrationFlow() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
-  const reg      = useFamilyRegistration();
+  const reg      = useFamilyRegistration(user?.uid);
 
   // showMobilePrompt: true only for Google users (no mobile in profile)
   const [showMobilePrompt, setShowMobilePrompt] = useState(false);
@@ -290,6 +289,8 @@ export default function FamilyRegistrationFlow() {
   const handleMobileNotFound = ({ full, countryCode, digits }) => {
     setShowMobilePrompt(false);
     seedSelfContact({ mobile: full, countryCode, digits });
+    // Persist mobile to RTDB user node so prompt doesn't show again next login
+    if (user?.uid) saveUserMobile(user.uid, full, countryCode).catch(console.error);
   };
 
   // Google user skips mobile prompt entirely

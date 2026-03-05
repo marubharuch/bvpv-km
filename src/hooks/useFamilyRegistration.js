@@ -2,20 +2,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { genId } from "../lib/text";
 
-const KEY = "family_reg_draft";
 const STEPS = { CITY: "city", CONTACTS: "contacts", REORDER: "reorder" };
 const init  = { step: STEPS.CITY, city: "", contacts: [] };
 
-const persist = s => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
-const load    = ()  => { try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; } };
-const clear   = ()  => { try { localStorage.removeItem(KEY); } catch {} };
+const key     = uid => `family_reg_draft:${uid || "anon"}`;
+const persist = (uid, s) => { try { localStorage.setItem(key(uid), JSON.stringify(s)); } catch {} };
+const load    = uid     => { try { return JSON.parse(localStorage.getItem(key(uid))) || null; } catch { return null; } };
+const clear   = uid     => { try { localStorage.removeItem(key(uid)); } catch {} };
 
 export { STEPS };
 
-export function useFamilyRegistration() {
-  const [state, setState] = useState(() => load() || init);
+export function useFamilyRegistration(uid) {
+  const [state, setState] = useState(() => load(uid) || init);
 
-  useEffect(() => { if (state.step !== "success") persist(state); }, [state]);
+  useEffect(() => { if (state.step !== "success") persist(uid, state); }, [state, uid]);
 
   const patch = useCallback(p => setState(s => ({ ...s, ...p })), []);
 
@@ -56,8 +56,8 @@ export function useFamilyRegistration() {
   const removeContact = useCallback(id =>
     setState(s => ({ ...s, contacts: s.contacts.filter(c => c.id !== id) })), []);
 
-  const onSuccess = useCallback(() => { clear(); patch({ step: "success" }); }, [patch]);
-  const reset     = useCallback(() => { clear(); setState(init); }, []);
+  const onSuccess = useCallback(() => { clear(uid); patch({ step: "success" }); }, [patch, uid]);
+  const reset     = useCallback(() => { clear(uid); setState(init); }, [uid]);
 
   return {
     step: state.step, city: state.city, contacts: state.contacts,
