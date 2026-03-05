@@ -121,7 +121,7 @@ function MobilePromptSheet({ user, onFound, onNotFound, onSkip }) {
         <button onClick={handleCheck} disabled={busy || !rawInput.trim()}
           className="w-full py-3.5 rounded-2xl text-sm font-extrabold text-white disabled:opacity-50"
           style={{ background: COLORS.primary }}>
-          {busy ? "Checking…" : "Find My Family →"}
+          {busy ? "Checking…" : "Next →"}
         </button>
 
         <button onClick={onSkip}
