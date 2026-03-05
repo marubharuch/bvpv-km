@@ -36,33 +36,39 @@ export async function saveMember({ memberId, familyId, payload, isAdding, existi
   delete clean.fullMobile;    // no separate field needed — mobile IS full
 
   // ── Write member node ─────────────────────────────────────────
-  const writes = {};
+  // Writing to members/$memberId uses a cross-node security rule that checks
+  // root.child('users').child(auth.uid).child('familyId') == members/$memberId/familyId.
+  // Root-level batch writes break this rule evaluation, so we:
+  //   1. Write the member node directly (path-scoped → rule evaluates cleanly)
+  //   2. Batch everything else (families, mobileIndex, honoraryIndex — simpler rules)
+  const sideWrites = {};
+
   if (isAdding) {
     memberId = memberId || `MEM_${ts}`;
-    writes[`members/${memberId}`]                      = memberDoc({ ...clean, familyId, createdAt: ts });
-    writes[`families/${familyId}/members/${memberId}`] = true;
+    await rtdb.set(`members/${memberId}`, memberDoc({ ...clean, familyId, createdAt: ts }));
+    sideWrites[`families/${familyId}/members/${memberId}`] = true;
   } else {
     const photoURL = payload.photoURL || existingMember.photoURL || "";
-    writes[`members/${memberId}`] = { ...clean, photoURL, updatedAt: ts };
+    await rtdb.update(`members/${memberId}`, { ...clean, photoURL, updatedAt: ts });
   }
 
   // ── mobileIndex ───────────────────────────────────────────────
   if (full) {
-    Object.assign(writes, buildMobileIndexWrites(full, cc, {
+    Object.assign(sideWrites, buildMobileIndexWrites(full, cc, {
       memberId, familyId, source: "manualAdd",
     }));
   }
 
   // ── Honorary orgs ─────────────────────────────────────────────
   if (payload.honoraryOrgs !== undefined) {
-    ALL_ORG_IDS.forEach(orgId => { writes[`honoraryIndex/${orgId}/${memberId}`] = null; });
+    ALL_ORG_IDS.forEach(orgId => { sideWrites[`honoraryIndex/${orgId}/${memberId}`] = null; });
     const photo = payload.photoURL || existingMember?.photoURL || "";
     (payload.honoraryOrgs || []).forEach(entry => {
       if (!entry.orgId || !entry.post) return;
-      writes[`honoraryIndex/${entry.orgId}/${memberId}`] = honoraryIndexDoc({
+      sideWrites[`honoraryIndex/${entry.orgId}/${memberId}`] = honoraryIndexDoc({
         memberId, familyId,
         memberName: payload.name,
-        mobile:     full,           // fullMobile in honorary too
+        mobile:     full,
         city:       payload.city || existingMember?.city || "",
         photoURL:   photo ? `${photo}?v=${ts}` : "",
         post:       entry.post,
@@ -72,7 +78,7 @@ export async function saveMember({ memberId, familyId, payload, isAdding, existi
     });
   }
 
-  await rtdb.batch(writes);
+  if (Object.keys(sideWrites).length) await rtdb.batch(sideWrites);
   return memberId;
 }
 

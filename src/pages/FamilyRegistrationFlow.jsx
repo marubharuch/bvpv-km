@@ -90,7 +90,7 @@ function MobilePromptSheet({ user, onFound, onNotFound, onSkip }) {
               Welcome, {user.displayName?.split(" ")[0] || "there"}! 🙏
             </p>
             <p className="text-xs" style={{ color: COLORS.textSecondary }}>
-              Enter your mobile to find your family
+              Enter your mobile 
             </p>
           </div>
         </div>

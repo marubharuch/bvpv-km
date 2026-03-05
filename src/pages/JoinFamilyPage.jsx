@@ -9,7 +9,7 @@ import { COLORS }                 from "../constants/app";
 import PinInput                   from "../components/ui/PinInput";
 
 export default function JoinFamilyPage() {
-  const { user }         = useAuth();
+  const { user, refreshUser } = useAuth();
   const [params]         = useSearchParams();
   const familyId         = params.get("familyId");
   const navigate         = useNavigate();
@@ -60,7 +60,8 @@ export default function JoinFamilyPage() {
         ts,
       });
 
-      navigate("/dashboard");
+      await refreshUser();
+      navigate("/dashboard", { replace: true });
     } catch (e) {
       setErr("Something went wrong. Please try again.");
     } finally {
