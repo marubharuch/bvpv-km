@@ -25,6 +25,7 @@ export default function LoginPage() {
   }, [user, ready, navigate]);
 
   const [tab,  setTab]  = useState("login");
+  const [name, setName] = useState("");
   const [email,setEmail]= useState("");
   const [pass, setPass] = useState("");
   const [cc,   setCc]   = useState("+91");
@@ -49,7 +50,7 @@ export default function LoginPage() {
   const registerEmail = () => go(async () => {
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
     const full = mob ? toFullMobile(cc, mob) : "";
-    await ensureUser(cred.user, { mobile: full, countryCode: cc });
+    await ensureUser(cred.user, { displayName: name.trim(), mobile: full, countryCode: cc });
     return cred;
   });
 
@@ -122,12 +123,17 @@ export default function LoginPage() {
         style={inputStyle} className={inputCls} />
 
       {tab === "register" && (
-        <div>
-          <p className="text-xs font-semibold mb-1.5" style={{ color: COLORS.primary }}>
-            Mobile (optional)
-          </p>
-          <MobileInput countryCode={cc} onCountryCodeChange={setCc}
-            number={mob} onNumberChange={setMob} />
+        <div className="space-y-3">
+          <input type="text" placeholder="Full name" value={name}
+            onChange={e => setName(e.target.value)}
+            style={inputStyle} className={inputCls} />
+          <div>
+            <p className="text-xs font-semibold mb-1.5" style={{ color: COLORS.primary }}>
+              Mobile (optional)
+            </p>
+            <MobileInput countryCode={cc} onCountryCodeChange={setCc}
+              number={mob} onNumberChange={setMob} />
+          </div>
         </div>
       )}
 

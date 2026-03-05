@@ -67,12 +67,15 @@ export function AuthProvider({ children }) {
         const slim = {
           uid:           firebaseUser.uid,
           email:         firebaseUser.email,
-          displayName:   firebaseUser.displayName,
+          // Prefer RTDB displayName (set for email users) over Firebase Auth (null for email users)
+          displayName:   userData.displayName || firebaseUser.displayName || null,
           photoURL:      firebaseUser.photoURL,
           emailVerified: firebaseUser.emailVerified,
           familyId:      userData.familyId  || null,
           role:          userData.role      || null,
           memberId:      userData.memberId  || null,
+          mobile:        userData.mobile    || null,
+          countryCode:   userData.countryCode || "+91",
         };
 
         setUser(slim);

@@ -39,6 +39,7 @@ export function memberDoc(f = {}) {
 /** users/{uid} */
 export function userDoc(f = {}) {
   return {
+    displayName: f.displayName || null,
     email:       f.email       || null,
     mobile:      f.mobile      || null,   // "+919974021397" always
     countryCode: f.countryCode || "+91",

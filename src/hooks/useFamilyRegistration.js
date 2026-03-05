@@ -41,10 +41,10 @@ export function useFamilyRegistration() {
     return { ...s, contacts: [...s.contacts, ...fresh] };
   }), []);
 
-  const addContact = useCallback((name, phone, countryCode = "+91") =>
+  const addContact = useCallback((name, phone, countryCode = "+91", isSelf = false) =>
     setState(s => ({
       ...s,
-      contacts: [...s.contacts, { id: genId(), name: name.trim(), phone: phone.trim(), countryCode }],
+      contacts: [...s.contacts, { id: genId(), name: name.trim(), phone: phone.trim(), countryCode, isSelf }],
     })), []);
 
   const updateContact = useCallback((id, field, value) =>

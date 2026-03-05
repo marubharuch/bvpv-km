@@ -11,15 +11,17 @@ import { buildMobileIndexWrites } from "./mobileIndexDb";
 export async function ensureUser(firebaseUser, extra = {}) {
   if (!firebaseUser?.uid) return;
 
-  const cc   = extra.countryCode || "+91";
-  const full = extra.mobile || null;   // must be fullMobile if provided
+  const cc          = extra.countryCode || "+91";
+  const full        = extra.mobile      || null;   // must be fullMobile if provided
+  const displayName = extra.displayName || firebaseUser.displayName || null;
 
   const existing = await rtdb.get(`users/${firebaseUser.uid}`);
   if (!existing) {
     const writes = {};
     writes[`users/${firebaseUser.uid}`] = userDoc({
-      email: firebaseUser.email || null,
-      mobile: full,
+      displayName,
+      email:       firebaseUser.email || null,
+      mobile:      full,
       countryCode: cc,
     });
     if (firebaseUser.email) {
