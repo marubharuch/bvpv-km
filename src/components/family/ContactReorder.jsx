@@ -1,16 +1,23 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { COLORS }           from "../../constants/app";
 
 export function ContactReorder({ contacts, city, onReorder, onSubmit, onBack, submitting }) {
-  const [items,    setItems]    = useState(contacts);
-  const [dragging, setDragging] = useState(null);
-  const [over,     setOver]     = useState(null);
+  const [items,       setItems]       = useState(contacts);
+  const [dragging,    setDragging]    = useState(null);
+  const [over,        setOver]        = useState(null);
+  const [showHint,    setShowHint]    = useState(true);
   const dragId = useRef(null);
   const overId = useRef(null);
 
+  // Auto-hide hint after 4 seconds
+  useEffect(() => {
+    const t = setTimeout(() => setShowHint(false), 4000);
+    return () => clearTimeout(t);
+  }, []);
+
   function reorder(next) { setItems(next); onReorder(next); }
 
-  function onDragStart(e, id) { dragId.current = id; setDragging(id); e.dataTransfer.effectAllowed = "move"; }
+  function onDragStart(e, id) { dragId.current = id; setDragging(id); setShowHint(false); e.dataTransfer.effectAllowed = "move"; }
   function onDragEnter(id)    { overId.current = id; setOver(id); }
   function onDragEnd() {
     const from = items.findIndex(c => c.id === dragId.current);
@@ -24,7 +31,7 @@ export function ContactReorder({ contacts, city, onReorder, onSubmit, onBack, su
     dragId.current = null; overId.current = null;
   }
 
-  function onTouchStart(e, id) { dragId.current = id; setDragging(id); }
+  function onTouchStart(e, id) { dragId.current = id; setDragging(id); setShowHint(false); }
   function onTouchMove(e) {
     e.preventDefault();
     const el  = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
@@ -51,6 +58,26 @@ export function ContactReorder({ contacts, city, onReorder, onSubmit, onBack, su
           style={{ background: `${COLORS.primary}12`, color: COLORS.primary }}>Step 3 of 3</span>
         <h2 className="text-2xl font-extrabold" style={{ color: COLORS.textPrimary }}>Set Family Order</h2>
         <p className="text-sm mt-0.5" style={{ color: COLORS.textSecondary }}>Drag to reorder · First person = Head of family</p>
+      </div>
+
+      {/* Gujarati hint banner */}
+      <div
+        className="flex items-start gap-3 px-4 py-3 rounded-2xl transition-all duration-500"
+        style={{
+          background:   "linear-gradient(135deg,#fffbeb,#fef3c7)",
+          border:       "1.5px solid #f59e0b",
+          opacity:      showHint ? 1 : 0,
+          maxHeight:    showHint ? 120 : 0,
+          overflow:     "hidden",
+          padding:      showHint ? undefined : 0,
+          marginBottom: showHint ? undefined : -16,
+        }}
+      >
+        <span className="text-xl flex-shrink-0 mt-0.5">☝️</span>
+        <p className="text-xs leading-relaxed font-semibold" style={{ color: "#92400e" }}>
+          કોઈપણ નામ પર ટચ (Touch) કરી રાખી તેને ઉપર-નીચે ખસેડી શકાશે.
+          પરિવારના મુખ્ય વ્યક્તિ (Family Head) નું નામ સૌથી ઉપર રાખો.
+        </p>
       </div>
 
       <div className="flex flex-col gap-2">

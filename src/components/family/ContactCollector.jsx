@@ -25,6 +25,21 @@ export function ContactCollector({ city, contacts, onAdd, onAddMany, onUpdate, o
     onAdd(name, phone, cc);
     setName(""); setPhone(""); setCc("+91"); setErr(""); setShowForm(false);
   };
+  // Form માં data છે?
+const formHasData = name.trim() || phone.trim();
+
+const handleConfirm = () => {
+  // Form માં data છે — auto add કરો પછી confirm
+  if (showForm && formHasData) {
+    if (!name.trim()) { setErr("Enter a name."); return; }
+    if (!phone.trim()) { setErr("Enter a mobile number."); return; }
+    onAdd(name, phone, cc);
+    setName(""); setPhone(""); setCc("+91"); setErr(""); setShowForm(false);
+    setTimeout(() => onConfirm(), 100);
+    return;
+  }
+  if (allFilled) onConfirm();
+};  
 
   return (
     <div className="p-5 pb-8 flex flex-col gap-4">
@@ -90,7 +105,7 @@ export function ContactCollector({ city, contacts, onAdd, onAddMany, onUpdate, o
         )}
       </div>
 
-      <button onClick={allFilled ? onConfirm : undefined} disabled={!allFilled}
+      <button onClick={handleConfirm} disabled={contacts.length === 0 && !formHasData}
         className="w-full py-4 rounded-2xl text-base font-extrabold transition-all"
         style={{
           background: allFilled ? "#22c55e" : "#f3f4f6",

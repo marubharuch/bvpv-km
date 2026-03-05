@@ -1,8 +1,24 @@
+import { useState, useEffect } from "react";
 import { Outlet }      from "react-router-dom";
 import BottomNavbar    from "./BottomNavbar";
+import OnboardingTour  from "./OnboardingTour";           // ← તમારા components folder માં
+import { NAVBAR_TOUR_STEPS }  from "../../constants/tourSteps";
 import { APP_NAME, APP_TAGLINE, COLORS } from "../../constants/app";
 
 export default function AppLayout() {
+
+  const [tourActive, setTourActive] = useState(false);
+
+  useEffect(() => {
+    const seen = localStorage.getItem("appTourDone");
+    if (!seen) setTourActive(true);
+  }, []);
+
+  const handleFinish = () => {
+    localStorage.setItem("appTourDone", "true");
+    setTourActive(false);
+  };
+
   return (
     <div className="min-h-screen" style={{ background: COLORS.bg }}>
       <header className="sticky top-0 z-40"
@@ -17,8 +33,18 @@ export default function AppLayout() {
           </div>
         </div>
       </header>
+
       <main className="pb-20"><Outlet /></main>
+
       <BottomNavbar />
+
+      {/* Onboarding Tour — app પહેલી વાર open થાય ત્યારે જ */}
+      {tourActive && (
+        <OnboardingTour
+          steps={NAVBAR_TOUR_STEPS}
+          onFinish={handleFinish}
+        />
+      )}
     </div>
   );
 }

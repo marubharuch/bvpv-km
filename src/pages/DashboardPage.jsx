@@ -12,9 +12,11 @@ import { COLORS }            from "../constants/app";
 import EditMemberModal       from "../components/member/EditMemberModal";
 import PhotoUpload           from "../components/member/PhotoUpload";
 import Spinner               from "../components/ui/Spinner";
+import OnboardingTour        from "../components/layout/OnboardingTour";
+import { DASHBOARD_TOUR_STEPS } from "../constants/tourSteps";
 import { Plus, RefreshCw, ChevronRight, Phone, MapPin, Pencil } from "lucide-react";
 
-// ── Inline editable field (city / native / address in hero) ───────
+// ── Inline editable field ─────────────────────────────────────────
 function InlineField({ icon, value, placeholder, onSave, uppercase = false }) {
   const [editing, setEditing] = useState(false);
   const [draft,   setDraft]   = useState(value || "");
@@ -76,7 +78,7 @@ function memberSubtitle(m) {
   if (m.isStudent) parts.push(m.education || m.educationType || "Student");
   else if (m.occupation) parts.push(m.occupation);
   if (m.maritalStatus === "Married") parts.push("Married");
-  if (m.stayAway && m.stayCity)  parts.push(`📍 ${m.stayCity}`);
+  if (m.stayAway && m.stayCity) parts.push(`📍 ${m.stayCity}`);
   return parts.join(" · ") || "Member";
 }
 
@@ -89,6 +91,22 @@ export default function DashboardPage() {
   const [editingMember, setEditingMember] = useState(null);
   const [showAdd,       setShowAdd]       = useState(false);
   const [activeTab,     setActiveTab]     = useState("all");
+  const [dashTour,      setDashTour]      = useState(false);
+
+  // ── Dashboard tour — runs after nav tour is done ───────────────
+  useEffect(() => {
+    const navDone  = localStorage.getItem("appTourDone");
+    const dashDone = localStorage.getItem("dashTourDone");
+    if (navDone && !dashDone) {
+      const t = setTimeout(() => setDashTour(true), 800);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const handleDashTourFinish = () => {
+    localStorage.setItem("dashTourDone", "true");
+    setDashTour(false);
+  };
 
   const CACHE_KEY = user?.uid ? `dash:family:${user.uid}` : null;
 
@@ -142,12 +160,12 @@ export default function DashboardPage() {
     </div>
   );
 
-  const members   = family.members || [];
-  const head      = members.find(m => m.isHead) || members[0];
-  const students  = members.filter(m => m.isStudent);
-  const others    = members.filter(m => !m.isStudent);
-  const filtered  = activeTab === "students" ? students : activeTab === "others" ? others : members;
-  const pct       = calcCompletion(family, members);
+  const members  = family.members || [];
+  const head     = members.find(m => m.isHead) || members[0];
+  const students = members.filter(m => m.isStudent);
+  const others   = members.filter(m => !m.isStudent);
+  const filtered = activeTab === "students" ? students : activeTab === "others" ? others : members;
+  const pct      = calcCompletion(family, members);
 
   const waInvite = m => {
     const text = encodeURIComponent(`Hello ${m.name?.split(" ")[0] || ""}! 🙏\nJoin our Family App.\nLink: ${window.location.origin}/join?familyId=${familyId}\nPIN: ${family.familyPin}`);
@@ -158,7 +176,7 @@ export default function DashboardPage() {
     <div className="max-w-md mx-auto pb-24 min-h-screen" style={{ background: COLORS.bg }}>
 
       {/* Hero */}
-      <div className="px-4 pt-3 pb-5 relative overflow-hidden"
+      <div id="tour-profile-section" className="px-4 pt-3 pb-5 relative overflow-hidden"
         style={{ background: "linear-gradient(135deg,#5A1020,#7B1C2E,#9B2335)" }}>
         <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: COLORS.gold }} />
 
@@ -221,21 +239,25 @@ export default function DashboardPage() {
       </div>
 
       {/* Member cards */}
-      <div className="px-4 mt-3 space-y-2">
+      <div id="tour-member-list" className="px-4 mt-3 space-y-2">
         {filtered.length === 0 && (
           <div className="bg-white rounded-xl p-6 text-center text-sm" style={{ color: COLORS.primaryLight }}>
             No members in this category
           </div>
         )}
-        {filtered.map(member => (
+        {filtered.map((member, index) => (
           <div key={member.id} className="bg-white rounded-xl overflow-hidden"
             style={{ boxShadow: "0 2px 10px rgba(90,16,32,0.08)" }}>
             <div className="flex items-start gap-3 p-3">
-              <PhotoUpload memberId={member.id} photoURL={member.photoURL}
-                honoraryOrgs={member.honoraryOrgs || []}
-                onUpdate={async (id, url) => patchFamily(f => ({
-                  ...f, members: f.members.map(m => m.id === id ? { ...m, photoURL: url } : m),
-                }))} />
+              <div id={index === 0 ? "tour-member-photo" : undefined}>
+                <PhotoUpload
+                  memberId={member.id}
+                  photoURL={member.photoURL}
+                  honoraryOrgs={member.honoraryOrgs || []}
+                  onUpdate={async (id, url) => patchFamily(f => ({
+                    ...f, members: f.members.map(m => m.id === id ? { ...m, photoURL: url } : m),
+                  }))} />
+              </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <p className="font-semibold text-sm" style={{ color: COLORS.primaryDark }}>
@@ -269,7 +291,7 @@ export default function DashboardPage() {
                   <p className="text-xs mt-0.5" style={{ color: COLORS.textSecondary, opacity: 0.7 }}>🎂 {member.dob}</p>
                 )}
               </div>
-              <button onClick={() => setEditingMember(member)}
+              <button id={index === 0 ? "tour-edit-member" : undefined} onClick={() => setEditingMember(member)}
                 className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
                 style={{ background: "#FDE8EC", color: COLORS.primary }}>
                 <ChevronRight size={16} />
@@ -296,11 +318,19 @@ export default function DashboardPage() {
         }} />
 
       {/* FAB */}
-      <button onClick={() => setShowAdd(true)}
+      <button id="tour-add-member" onClick={() => setShowAdd(true)}
         className="fixed bottom-20 right-4 w-14 h-14 text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-95 transition-transform"
         style={{ background: COLORS.primary, boxShadow: "0 4px 16px rgba(90,16,32,0.4)" }}>
         <Plus size={26} />
       </button>
+
+      {/* Dashboard tour */}
+      {dashTour && (
+        <OnboardingTour
+          steps={DASHBOARD_TOUR_STEPS}
+          onFinish={handleDashTourFinish}
+        />
+      )}
     </div>
   );
 }
