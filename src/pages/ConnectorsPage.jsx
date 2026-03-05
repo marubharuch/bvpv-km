@@ -6,11 +6,12 @@
  *  - Invite 48hr; after expiry any user can re-invite
  */
 
-import { useState, useEffect, useContext } from "react";
+import { useAuth } from "../store/AuthContext";
+import { useState, useEffect } from "react";
 import { ref, get } from "firebase/database";
-import { batchWrite, updatePath } from "../services/rtdbService";
-import { db } from "../firebase";
-import { AuthContext } from "../context/AuthContext";
+//import { rtdb.batch, rtdb.update } from "../db/rtdb";
+import { db } from "../lib/firebase";
+//import { useAuth } from "../store/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 function normalizePhone(p) {
@@ -27,7 +28,7 @@ const CITIES = [
 ];
 
 export default function ConnectorsPage() {
-  const { user } = useContext(AuthContext);
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState("add");
 
@@ -137,7 +138,7 @@ export default function ConnectorsPage() {
         setSubmitting(false);
         return;
       }
-      await batchWrite(updates);
+      await rtdb.batch(updates);
       await loadStats();
       setPicked([]); setSelected({});
       setSubmitDone(true);
@@ -176,8 +177,8 @@ export default function ConnectorsPage() {
     );
     try {
       await Promise.all([
-        updatePath(`connectors/${contact.phone}`, { invitedBy: user.uid, invitedAt: Date.now(), invite: inviteData }),
-        updatePath(`mobileIndex/${contact.phone}`, { invite: inviteData }),
+        rtdb.update(`connectors/${contact.phone}`, { invitedBy: user.uid, invitedAt: Date.now(), invite: inviteData }),
+        rtdb.update(`mobileIndex/${contact.phone}`, { invite: inviteData }),
       ]);
       setInviteList(prev => prev.filter(c => c.phone !== contact.phone));
       await loadStats();

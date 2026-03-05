@@ -1,148 +1,173 @@
-import { useState } from "react";
-import {
-  getAuth, signInWithPopup, GoogleAuthProvider,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword
-} from "firebase/auth";
-import { ref, get } from "firebase/database";
-import { db } from "../firebase";
+// pages/LoginPage.jsx
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ensureUserRecord } from "../services/userService";
-import LoadingOverlay from "../components/ui/LoadingOverlay";
-import MobileInput from "../components/ui/MobileInput";
+import {
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail,
+} from "firebase/auth";
+import { ensureUser } from "../db/userDb";
+import { getUser }    from "../db/userDb";
+import { toFullMobile } from "../lib/phone";
+import { COLORS }     from "../constants/app";
+import MobileInput    from "../components/ui/MobileInput";
+import { useAuth }    from "../store/AuthContext";
 
 export default function LoginPage() {
-  const [tab,         setTab]         = useState("login");
-  const [email,       setEmail]       = useState("");
-  const [password,    setPassword]    = useState("");
-  const [countryCode, setCountryCode] = useState("+91");
-  const [mobile,      setMobile]      = useState("");
-  const [loading,     setLoading]     = useState(false);
-  const [loadingMsg,  setLoadingMsg]  = useState("");
-
   const navigate = useNavigate();
   const auth     = getAuth();
+  const { user, ready } = useAuth();
 
-  const normalizedMobile = () => {
-    const digits = mobile.trim().replace(/\D/g, "").slice(-10);
-    return digits ? `${countryCode}${digits}` : "";
-  };
+  // Redirect already-logged-in users away from the login page
+  useEffect(() => {
+    if (!ready) return;
+    if (user) {
+      navigate(user.familyId ? "/dashboard" : "/registration", { replace: true });
+    }
+  }, [user, ready, navigate]);
 
-  // LoginPage.jsx
-const afterAuth = async (uid) => {
-  try {
-    // ✅ wait for token to propagate
-    const currentUser = getAuth().currentUser;
-    if (currentUser) await currentUser.getIdToken(true);
-    await new Promise(resolve => setTimeout(resolve, 500));
+  const [tab,  setTab]  = useState("login");
+  const [email,setEmail]= useState("");
+  const [pass, setPass] = useState("");
+  const [cc,   setCc]   = useState("+91");
+  const [mob,  setMob]  = useState("");
+  const [err,  setErr]  = useState("");
+  const [busy, setBusy] = useState(false);
 
-    const snap = await get(ref(db, `users/${uid}/familyId`));
-    if (snap.exists() && snap.val()) {
-      navigate("/dashboard", { replace: true });
-    } else {
+  // After login: check if user already has family → go to dashboard directly
+  const afterLogin = async (firebaseUser) => {
+    try {
+      const userData = await getUser(firebaseUser.uid, firebaseUser.email);
+      if (userData?.familyId) {
+        navigate("/dashboard", { replace: true });
+      } else {
+        navigate("/registration", { replace: true });
+      }
+    } catch {
       navigate("/onboarding", { replace: true });
     }
-  } catch (e) {
-    console.error("afterAuth error:", e);
-    // ✅ still navigate even if DB read fails
-    navigate("/onboarding", { replace: true });
-  }
-};
-
-  const loginWithGoogle = async () => {
-    setLoading(true);
-    setLoadingMsg("Signing in with Google...");
-    try {
-      const provider = new GoogleAuthProvider();
-       provider.setCustomParameters({ prompt: 'select_account' }); // ✅ add this
-      const res      = await signInWithPopup(auth, provider);
-      setLoadingMsg("Setting up your account...");
-      await ensureUserRecord(res.user);
-      await afterAuth(res.user.uid);
-    } catch {
-      alert("Google login failed");
-    }
-    setLoading(false);
   };
 
-  const login = async () => {
-    setLoading(true);
-    setLoadingMsg("Logging in...");
+  const go = async fn => {
+    setBusy(true); setErr("");
     try {
-      const res = await signInWithEmailAndPassword(auth, email, password);
-      setLoadingMsg("Checking your account...");
-      await ensureUserRecord(res.user);
-      await afterAuth(res.user.uid);
-    } catch {
-      alert("Invalid email or password");
-    }
-    setLoading(false);
-  };
-
-  const register = async () => {
-    setLoading(true);
-    setLoadingMsg("Creating your account...");
-    try {
-      const res = await createUserWithEmailAndPassword(auth, email, password);
-      setLoadingMsg("Setting up your account...");
-     await ensureUserRecord(res.user, { 
-  mobile:      normalizedMobile(),        // +919974021397
-  countryCode: countryCode || "+91",
-});
-      await afterAuth(res.user.uid);
+      const cred = await fn();
+      await afterLogin(cred.user);
     } catch (e) {
-      alert(e.message);
+      setErr(e.message.replace("Firebase: ", "").replace(/\(.*\)/, "").trim());
+    } finally {
+      setBusy(false);
     }
-    setLoading(false);
   };
+
+  const loginEmail   = () => go(() => signInWithEmailAndPassword(auth, email, pass));
+
+  const registerEmail = () => go(async () => {
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    const full = mob ? toFullMobile(cc, mob) : "";
+    await ensureUser(cred.user, { mobile: full, countryCode: cc });
+    return cred;
+  });
+
+  const loginGoogle = () => go(async () => {
+    const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+    await ensureUser(cred.user);
+    return cred;
+  });
+
+  const forgotPass = async () => {
+    if (!email) { setErr("Enter your email first."); return; }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setErr("✅ Password reset email sent!");
+    } catch (e) {
+      setErr(e.message.replace("Firebase: ", "").replace(/\(.*\)/, "").trim());
+    }
+  };
+
+  const inputStyle = {
+    border: `2px solid ${COLORS.border}`,
+    fontSize: 16,
+    background: "#fff",
+    color: COLORS.textPrimary,
+  };
+  const inputCls = "w-full rounded-xl px-4 py-3 outline-none focus:border-[#C9A84C] transition-colors";
 
   return (
-    <div className="max-w-md mx-auto p-6 space-y-5">
-      {loading && <LoadingOverlay message={loadingMsg} />}
+    <div className="max-w-md mx-auto p-4 pt-8 space-y-4">
+      <div className="text-center space-y-1 mb-6">
+        <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl mx-auto mb-3"
+          style={{ background: "linear-gradient(135deg,#5A1020,#7B1C2E)" }}>🙏</div>
+        <h1 className="text-xl font-bold" style={{ color: COLORS.primaryDark }}>Welcome</h1>
+        <p className="text-sm" style={{ color: COLORS.textSecondary }}>Login or create your account</p>
+      </div>
 
-      <h1 className="text-2xl font-bold text-center text-blue-900">Community App</h1>
-
-      <button onClick={loginWithGoogle} disabled={loading}
-        className="w-full bg-red-500 text-white p-3 rounded-lg font-semibold disabled:opacity-50">
+      {/* Google */}
+      <button onClick={loginGoogle} disabled={busy}
+        className="w-full py-3.5 rounded-xl text-sm font-bold border-2 flex items-center justify-center gap-2 disabled:opacity-60"
+        style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: "#fff" }}>
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="G" />
         Continue with Google
       </button>
 
-      <div className="text-center text-gray-400">OR</div>
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px" style={{ background: COLORS.border }} />
+        <span className="text-xs" style={{ color: COLORS.textMuted }}>or</span>
+        <div className="flex-1 h-px" style={{ background: COLORS.border }} />
+      </div>
 
-      <div className="flex border rounded-lg overflow-hidden">
-        <button onClick={() => setTab("login")}
-          className={`flex-1 p-2 ${tab === "login" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>Login</button>
-        <button onClick={() => setTab("register")}
-          className={`flex-1 p-2 ${tab === "register" ? "bg-green-600 text-white" : "bg-gray-100"}`}>Register</button>
+      {/* Email / password tabs */}
+      <div className="flex rounded-xl overflow-hidden border-2" style={{ borderColor: COLORS.border }}>
+        {["login", "register"].map(t => (
+          <button key={t} onClick={() => { setTab(t); setErr(""); }}
+            className="flex-1 py-2.5 text-sm font-semibold transition-all capitalize"
+            style={tab === t
+              ? { background: COLORS.primary, color: COLORS.goldLight }
+              : { color: COLORS.textSecondary }}>
+            {t === "login" ? "Sign In" : "Register"}
+          </button>
+        ))}
       </div>
 
       <input type="email" placeholder="Email" value={email}
-        onChange={e => setEmail(e.target.value)} className="w-full border p-3 rounded-lg" />
-      <input type="password" placeholder="Password" value={password}
-        onChange={e => setPassword(e.target.value)} className="w-full border p-3 rounded-lg" />
+        onChange={e => setEmail(e.target.value)}
+        style={inputStyle} className={inputCls} />
+
+      <input type="password" placeholder="Password" value={pass}
+        onChange={e => setPass(e.target.value)}
+        style={inputStyle} className={inputCls} />
 
       {tab === "register" && (
         <div>
-          <p className="text-xs text-gray-500 mb-1">Mobile Number (optional)</p>
-          <MobileInput
-            countryCode={countryCode}
-            onCountryCodeChange={setCountryCode}
-            number={mobile}
-            onNumberChange={setMobile}
-          />
+          <p className="text-xs font-semibold mb-1.5" style={{ color: COLORS.primary }}>
+            Mobile (optional)
+          </p>
+          <MobileInput countryCode={cc} onCountryCodeChange={setCc}
+            number={mob} onNumberChange={setMob} />
         </div>
       )}
 
-      {tab === "login" && (
-        <p onClick={() => navigate("/forgot-password")}
-          className="text-sm text-blue-600 text-right cursor-pointer">
-          Forgot Password?
+      {err && (
+        <p className="text-xs text-center font-semibold px-2"
+          style={{ color: err.startsWith("✅") ? "#22c55e" : COLORS.error }}>
+          {err}
         </p>
       )}
 
-      {tab === "login"
-        ? <button onClick={login} disabled={loading} className="w-full bg-blue-600 text-white p-3 rounded-lg disabled:opacity-50">Login</button>
-        : <button onClick={register} disabled={loading} className="w-full bg-green-600 text-white p-3 rounded-lg disabled:opacity-50">Create Account</button>
-      }
+      <button
+        onClick={tab === "login" ? loginEmail : registerEmail}
+        disabled={busy}
+        className="w-full py-3.5 rounded-xl text-sm font-bold text-white disabled:opacity-60"
+        style={{ background: COLORS.primary }}>
+        {busy ? "Please wait…" : tab === "login" ? "Sign In" : "Create Account"}
+      </button>
+
+      {tab === "login" && (
+        <button onClick={forgotPass}
+          className="w-full text-xs text-center py-1"
+          style={{ color: COLORS.textSecondary }}>
+          Forgot password?
+        </button>
+      )}
     </div>
   );
 }

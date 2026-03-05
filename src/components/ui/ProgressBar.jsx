@@ -1,11 +1,9 @@
-// src/components/ui/ProgressBar.jsx
-export default function ProgressBar({ pct = 0, className = "" }) {
+import { COLORS } from "../../constants/app";
+export default function ProgressBar({ pct = 0 }) {
   return (
-    <div className={`h-1 bg-gray-100 overflow-hidden ${className}`}>
-      <div
-        className="h-full bg-green-500 transition-all duration-500"
-        style={{ width: `${pct}%` }}
-      />
+    <div className="h-1 w-full" style={{ background: COLORS.border }}>
+      <div className="h-full transition-all duration-500"
+        style={{ width: `${pct}%`, background: COLORS.gold }} />
     </div>
   );
 }

@@ -1,115 +1,91 @@
-/**
- * JoinFamilyPage.jsx
- * ─────────────────────────────────────────────
- * Refactored: uses userService.linkUserToFamily()
- * instead of inline Firebase writes.
- */
-
-import { useState, useContext } from "react";
+// pages/JoinFamilyPage.jsx
+import { useState, useContext }   from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { ref, get } from "firebase/database";
-import { db } from "../firebase";
-import { AuthContext } from "../context/AuthContext";
-import { linkUserToFamily } from "../services/userService";
-import { pushToPath } from "../services/rtdbService";
-import { memberSchema } from "../schema/schema";
-import { normalizeMobile } from "../utils/normalizePhone";
+import { useAuth }                from "../store/AuthContext";
+import { rtdb }                   from "../db/rtdb";
+import { linkUserToFamily }       from "../db/userDb";
+import { memberDoc }              from "../db/schema";
+import { toMobileKey, toFullMobile } from "../lib/phone";
+import { COLORS }                 from "../constants/app";
 
 export default function JoinFamilyPage() {
-  const { user } = useContext(AuthContext);
-  const [searchParams] = useSearchParams();
-  const familyId = searchParams.get("familyId");
-  const [pin,     setPin]     = useState("");
-  const [joining, setJoining] = useState(false);
-  const [error,   setError]   = useState("");
-  const navigate = useNavigate();
+  const { user }         = useAuth();
+  const [params]         = useSearchParams();
+  const familyId         = params.get("familyId");
+  const navigate         = useNavigate();
+  const [pin,    setPin] = useState("");
+  const [err,    setErr] = useState("");
+  const [busy,   setBusy]= useState(false);
 
   const handleJoin = async () => {
-    setError("");
+    setErr("");
+    if (!user)   { setErr("Please login first."); return; }
+    if (!familyId) { setErr("Invalid invite link."); return; }
+    if (!/^\d{4}$/.test(pin.trim())) { setErr("Enter a valid 4-digit PIN."); return; }
 
-    if (!user) { setError("Please login first."); return; }
-    if (!familyId) { setError("Invalid invite link — missing family ID."); return; }
-    if (!/^\d{4}$/.test(pin.trim())) { setError("Please enter a valid 4-digit PIN."); return; }
-
-    setJoining(true);
+    setBusy(true);
     try {
-      // 1. Verify family exists and PIN matches
-      const famSnap = await get(ref(db, `families/${familyId}`));
-      if (!famSnap.exists()) { setError("Family not found."); return; }
+      const fam = await rtdb.get(`families/${familyId}`);
+      if (!fam) { setErr("Family not found."); return; }
+      if (String(fam.familyPin) !== pin.trim()) { setErr("Incorrect PIN."); return; }
 
-      const famData = famSnap.val();
-      if (String(famData.familyPin) !== pin.trim()) {
-        setError("Incorrect PIN. Please try again.");
-        return;
-      }
-
-      // 2. Check if user already has a memberId
-      const userSnap = await get(ref(db, `users/${user.uid}`));
-      const userData = userSnap.exists() ? userSnap.val() : {};
-
+      const userData = await rtdb.get(`users/${user.uid}`) || {};
       if (userData.familyId && userData.familyId !== familyId) {
-        setError("You are already part of a different family.");
+        setErr("You are already in a different family.");
         return;
       }
 
-      const ts       = Date.now();
-      let memberId   = userData.memberId || null;
+      const ts      = Date.now();
+      let memberId  = userData.memberId || null;
 
-      // 3. Create a member node if none exists
       if (!memberId) {
-        memberId = await pushToPath("members", memberSchema({
-          name:      user.displayName || user.email || "Member",
-          mobile:    normalizeMobile(userData.mobile),
-          email:     user.email || "",
-          photoURL:  user.photoURL || "",
-          isSelf:    true,
+        const mob10 = toMobileKey(userData.mobile || "");
+        memberId = `MEM_${ts}`;
+        await rtdb.set(`members/${memberId}`, memberDoc({
+          name:     user.displayName || user.email || "Member",
+          mobile:   mob10,
+          fullMobile: userData.mobile || "",
+          countryCode: userData.countryCode || "+91",
+          email:    user.email || "",
+          photoURL: user.photoURL || "",
+          isSelf:   true,
           familyId,
           createdAt: ts,
         }));
       }
 
-      // 4. Link user to family atomically via service
       await linkUserToFamily({
-        uid:      user.uid,
-        familyId,
-        memberId,
-        mobile:   normalizeMobile(userData.mobile),
-        email:    user.email,
+        uid: user.uid, familyId, memberId,
+        fullMobile:  userData.mobile || "",
+        countryCode: userData.countryCode || "+91",
+        email: user.email,
         ts,
       });
 
       navigate("/dashboard");
-
     } catch (e) {
-      console.error("Join family error:", e);
-      setError("Something went wrong. Please try again.");
+      setErr("Something went wrong. Please try again.");
     } finally {
-      setJoining(false);
+      setBusy(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto p-4 space-y-4">
-      <h2 className="text-lg font-bold text-center">Join Family</h2>
-
-      <input
-        type="number"
-        placeholder="Enter 4-digit PIN"
-        value={pin}
-        onChange={e => setPin(e.target.value)}
-        className="border w-full p-2 rounded"
-        maxLength={4}
-        disabled={joining}
-      />
-
-      {error && <p className="text-sm text-red-600 text-center">{error}</p>}
-
-      <button
-        onClick={handleJoin}
-        disabled={joining}
-        className="w-full bg-blue-600 text-white p-2 rounded disabled:opacity-50"
-      >
-        {joining ? "Joining..." : "Join"}
+    <div className="max-w-md mx-auto p-4 pt-8 space-y-4">
+      <div className="text-center space-y-1 mb-4">
+        <div className="text-4xl mb-2">🏠</div>
+        <h2 className="text-lg font-bold" style={{ color: COLORS.primaryDark }}>Join Family</h2>
+        <p className="text-sm" style={{ color: COLORS.textSecondary }}>Enter the 4-digit family PIN</p>
+      </div>
+      <input type="number" placeholder="4-digit PIN" value={pin}
+        onChange={e => setPin(e.target.value)} maxLength={4} disabled={busy}
+        className="w-full border-2 rounded-xl px-4 py-3 text-center text-2xl font-bold outline-none"
+        style={{ borderColor: COLORS.border, color: COLORS.textPrimary, fontSize: 24 }} />
+      {err && <p className="text-xs text-center font-semibold" style={{ color: COLORS.error }}>{err}</p>}
+      <button onClick={handleJoin} disabled={busy}
+        className="w-full py-3.5 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+        style={{ background: COLORS.primary }}>
+        {busy ? "Joining..." : "Join"}
       </button>
     </div>
   );

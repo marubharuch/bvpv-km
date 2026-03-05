@@ -1,149 +1,103 @@
-import { useState } from "react";
-import { ContactCard } from "./ContactCard";
-import { useContactPicker } from "../../hooks/useContactPicker";
-
+import { useState }            from "react";
+import { ContactCard }         from "./ContactCard";
+import { useContactPicker }    from "../../hooks/useContactPicker";
+import MobileInput             from "../ui/MobileInput";
+import { COLORS }              from "../../constants/app";
 
 export function ContactCollector({ city, contacts, onAdd, onAddMany, onUpdate, onRemove, onConfirm, onBack }) {
-  // If contacts already exist (pre-seeded), start with form hidden so confirm button is visible
   const [showForm, setShowForm] = useState(contacts.length === 0);
-  const [name, setName]         = useState("");
-  const [phone, setPhone]       = useState("");
-  const [err, setErr]           = useState("");
+  const [name,    setName]      = useState("");
+  const [phone,   setPhone]     = useState("");
+  const [cc,      setCc]        = useState("+91");
+  const [err,     setErr]       = useState("");
+  const { pick, picking, isSupported } = useContactPicker();
 
-  const { pick, picking, error: pickErr, isSupported } = useContactPicker();
+  const allFilled = contacts.length > 0 && contacts.every(c => (c.name||"").trim() && (c.phone||"").trim());
 
-  const allFilled   = contacts.length > 0 && contacts.every((c) => (c.name || "").trim() && (c.phone || c.mobile || "").trim());
-  const confirmText = contacts.length === 0
-    ? "Add at least one contact"
-    : `Confirm ${contacts.length} Contact${contacts.length > 1 ? "s" : ""} →`;
-
-  async function handlePick() {
+  const handlePick = async () => {
     const picked = await pick();
-    if (picked.length) {
-      onAddMany(picked);
-      setShowForm(false); // hide manual form so confirm button is visible
-    }
-  }
+    if (picked.length) { onAddMany(picked); setShowForm(false); }
+  };
 
-  function submit() {
-    if (!name.trim()) { setErr("Enter a name."); return; }
+  const submit = () => {
+    if (!name.trim())  { setErr("Enter a name."); return; }
     if (!phone.trim()) { setErr("Enter a mobile number."); return; }
-    onAdd(name, phone);
-    setName(""); setPhone(""); setErr("");
-    setShowForm(false); // hide form after adding so confirm button is visible
-  }
-
-  function onKey(e) {
-    if (e.key === "Enter") submit();
-    if (e.key === "Escape") { setShowForm(false); setErr(""); }
-  }
+    onAdd(name, phone, cc);
+    setName(""); setPhone(""); setCc("+91"); setErr(""); setShowForm(false);
+  };
 
   return (
     <div className="p-5 pb-8 flex flex-col gap-4">
-      {/* Header */}
       <div>
-        <button onClick={onBack} className="text-xs font-bold text-gray-400 hover:text-gray-700 transition mb-3">
-          ← Back
-        </button>
-        <span className="inline-block text-xs font-bold tracking-widest text-green-700 bg-green-50 px-3 py-1 rounded-full mb-2 uppercase">
-          Step 2 of 3
-        </span>
-        <h2 className="text-2xl font-extrabold text-gray-900 mb-0.5">Family Contacts</h2>
-        <p className="text-sm text-gray-500">
-          {contacts.length} contact{contacts.length !== 1 ? "s" : ""} — fill name &amp; mobile
+        <button onClick={onBack} className="text-xs font-bold mb-3" style={{ color: COLORS.textMuted }}>← Back</button>
+        <span className="inline-block text-xs font-bold tracking-widest px-3 py-1 rounded-full mb-2"
+          style={{ background: `${COLORS.primary}12`, color: COLORS.primary }}>Step 2 of 3</span>
+        <h2 className="text-2xl font-extrabold" style={{ color: COLORS.textPrimary }}>Family Contacts</h2>
+        <p className="text-sm mt-0.5" style={{ color: COLORS.textSecondary }}>
+          {contacts.length} contact{contacts.length !== 1 ? "s" : ""} — fill name & mobile
         </p>
       </div>
 
-      {/* Cards */}
       <div className="flex flex-col gap-3">
         {contacts.length === 0 && (
-          <div className="flex flex-col items-center gap-2 py-8 border-2 border-dashed border-gray-200 rounded-2xl text-gray-400">
+          <div className="flex flex-col items-center gap-2 py-8 rounded-2xl border-2 border-dashed"
+            style={{ borderColor: COLORS.border, color: COLORS.textMuted }}>
             <span className="text-3xl">👨‍👩‍👧‍👦</span>
             <p className="text-sm font-medium">No contacts yet</p>
           </div>
         )}
         {contacts.map((c, i) => (
-          <ContactCard
-            key={c.id}
-            contact={c}
-            index={i}
-            onUpdate={onUpdate}
-            onRemove={onRemove}
-            autoFocus={!c.name && i === contacts.length - 1}
-          />
+          <ContactCard key={c.id} contact={c} index={i}
+            onUpdate={onUpdate} onRemove={onRemove}
+            autoFocus={!c.name && i === contacts.length - 1} />
         ))}
       </div>
 
-      {/* Manual form */}
       {showForm && (
-        <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex flex-col gap-3">
-          <p className="text-xs font-black uppercase tracking-widest text-gray-400">Add Manually</p>
-          {err && <p className="text-xs font-semibold text-red-500">{err}</p>}
-          <input
-            type="text"
-            placeholder="Full name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={onKey}
-            autoFocus
-            className="w-full px-3 py-2.5 text-sm font-semibold bg-white border border-gray-200 rounded-xl outline-none focus:border-green-400 focus:ring-2 focus:ring-green-100 transition placeholder:text-gray-400 placeholder:font-normal"
-          />
-          <input
-            type="tel"
-            placeholder="Mobile number"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            onKeyDown={onKey}
-            inputMode="tel"
-            className="w-full px-3 py-2.5 text-sm font-semibold bg-white border border-gray-200 rounded-xl outline-none focus:border-green-400 focus:ring-2 focus:ring-green-100 transition placeholder:text-gray-400 placeholder:font-normal"
-          />
+        <div className="rounded-2xl p-4 space-y-3 border" style={{ background: "#f9f9f9", borderColor: COLORS.border }}>
+          <p className="text-xs font-black uppercase tracking-widest" style={{ color: COLORS.textMuted }}>Add Manually</p>
+          {err && <p className="text-xs font-semibold" style={{ color: COLORS.error }}>{err}</p>}
+          <input type="text" placeholder="Full name" value={name}
+            onChange={e => setName(e.target.value)} autoFocus
+            className="w-full px-3 py-2.5 text-sm font-semibold rounded-xl outline-none"
+            style={{ border: `1px solid ${COLORS.border}`, fontSize: 16 }} />
+          <MobileInput countryCode={cc} onCountryCodeChange={setCc}
+            number={phone} onNumberChange={setPhone} placeholder="Mobile number" />
           <div className="flex gap-2 justify-end">
-            <button
-              onClick={() => { setShowForm(false); setErr(""); }}
-              className="text-sm font-semibold text-gray-400 hover:text-gray-700 px-3 py-1.5 transition"
-            >Cancel</button>
-            <button
-              onClick={submit}
-              className="text-sm font-bold text-green-700 bg-green-50 hover:bg-green-100 px-4 py-1.5 rounded-lg transition"
-            >Add</button>
+            <button onClick={() => { setShowForm(false); setErr(""); }}
+              className="text-sm font-semibold px-3 py-1.5" style={{ color: COLORS.textMuted }}>Cancel</button>
+            <button onClick={submit}
+              className="text-sm font-bold px-4 py-1.5 rounded-lg"
+              style={{ background: `${COLORS.primary}15`, color: COLORS.primary }}>Add</button>
           </div>
         </div>
       )}
 
-      {pickErr && <p className="text-xs text-red-500 text-center">{pickErr}</p>}
-
-      {/* Action buttons */}
       <div className="flex gap-3">
         {isSupported && (
-          <button
-            onClick={handlePick}
-            disabled={picking}
-            className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-2xl hover:border-gray-400 hover:bg-gray-50 transition disabled:opacity-50"
-          >
+          <button onClick={handlePick} disabled={picking}
+            className="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold rounded-2xl border-2 disabled:opacity-50"
+            style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: "#fff" }}>
             📱 {picking ? "Opening…" : "Pick from Phone"}
           </button>
         )}
         {!showForm && (
-  <button
-    onClick={() => { setShowForm(true); setErr(""); }}
-    className="flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-2xl hover:border-gray-400 hover:bg-gray-50 transition"
-  >
-    + Add Manual
-  </button>
-)}
+          <button onClick={() => { setShowForm(true); setErr(""); }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-bold rounded-2xl border-2"
+            style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: "#fff" }}>
+            + Add Manual
+          </button>
+        )}
       </div>
 
-      {/* Confirm button */}
-      <button
-        onClick={allFilled ? onConfirm : undefined}
-        disabled={!allFilled}
-        className={`w-full py-4 rounded-2xl text-base font-extrabold tracking-wide transition ${
-          allFilled
-            ? "bg-green-500 hover:bg-green-600 text-white active:scale-[0.98]"
-            : "bg-gray-100 text-gray-400 cursor-not-allowed"
-        }`}
-      >
-        {confirmText}
+      <button onClick={allFilled ? onConfirm : undefined} disabled={!allFilled}
+        className="w-full py-4 rounded-2xl text-base font-extrabold transition-all"
+        style={{
+          background: allFilled ? "#22c55e" : "#f3f4f6",
+          color:      allFilled ? "#fff"    : "#9ca3af",
+          cursor:     allFilled ? "pointer" : "not-allowed",
+        }}>
+        {contacts.length === 0 ? "Add at least one contact" : `Confirm ${contacts.length} Contact${contacts.length > 1 ? "s" : ""} →`}
       </button>
     </div>
   );

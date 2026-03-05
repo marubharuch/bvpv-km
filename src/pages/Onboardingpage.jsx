@@ -1,283 +1,206 @@
-/**
- * pages/OnboardingPage.jsx
- * New user flow after login when no familyId exists:
- * 1. Get mobile from RTDB → or user.phoneNumber → or ask user
- * 2. Check mobileIndex/{mobile}
- * 3a. Found with familyId → show family summary + PIN entry → link
- * 3b. Not found → go to /registration
- */
+// pages/OnboardingPage.jsx
+import { useState, useEffect }    from "react";
+import { useNavigate }            from "react-router-dom";
+import { useAuth }                from "../store/AuthContext";
+import { getUser, linkUserToFamily } from "../db/userDb";
+import { getMobileIndex }         from "../db/mobileIndexDb";
+import { rtdb }                   from "../db/rtdb";
+import { toMobileKey, toFullMobile } from "../lib/phone";
+import { COLORS }                 from "../constants/app";
+import Card                       from "../components/ui/Card";
+import Spinner                    from "../components/ui/Spinner";
+import MobileInput                from "../components/ui/MobileInput";
+import PinInput                   from "../components/ui/PinInput";
 
-import { useState, useEffect, useContext } from "react";
-import { useNavigate } from "react-router-dom";
-import { ref, get } from "firebase/database";
-import { db } from "../firebase";
-import { AuthContext } from "../context/AuthContext";
-import { checkMobileIndex, registerMobileForUser } from "../services/mobileIndexService";
-import { batchWrite } from "../services/rtdbService";
-import { linkUserToFamily } from "../services/userService";
-import Card from "../components/ui/Card";
-import Spinner from "../components/ui/Spinner";
-import MobileInput from "../components/ui/MobileInput";
-import PinInput from "../components/ui/PinInput";
-import { normalizeMobile } from "../utils/normalizePhone";
-
-const STAGE = {
-  LOADING:      "loading",
-  ASK_MOBILE:   "ask_mobile",
-  CHECKING:     "checking",
-  FAMILY_FOUND: "family_found",
-  LINKING:      "linking",
-  NOT_FOUND:    "not_found",
-};
+const S = { LOADING:"loading", ASK:"ask", CHECKING:"checking", FOUND:"found", LINKING:"linking", NOTFOUND:"notfound" };
 
 export default function OnboardingPage() {
-  const { user, isLoading, authInitialized } = useContext(AuthContext);
-  const navigate  = useNavigate();
+  const { user, ready } = useAuth();
+  const navigate        = useNavigate();
 
-  const [stage,       setStage]       = useState(STAGE.LOADING);
-  const [mobile,      setMobile]      = useState("");
-  const [mobileInput, setMobileInput] = useState("");
-  const [ccInput,     setCcInput]     = useState("+91");
-  const [family,      setFamily]      = useState(null);
-  const [familyId,    setFamilyId]    = useState(null);
-  const [memberId,    setMemberId]    = useState(null);
-  const [headName,    setHeadName]    = useState("");
-  const [pin,         setPin]         = useState("");
-  const [pinError,    setPinError]    = useState("");
-  const [error,       setError]       = useState("");
+  const [stage,   setStage]   = useState(S.LOADING);
+  const [cc,      setCc]      = useState("+91");
+  const [numIn,   setNumIn]   = useState("");    // raw input
+  const [mob10,   setMob10]   = useState("");    // 10-digit key
+  const [family,  setFamily]  = useState(null);
+  const [famId,   setFamId]   = useState(null);
+  const [memId,   setMemId]   = useState(null);
+  const [head,    setHead]    = useState("");
+  const [pin,     setPin]     = useState("");
+  const [pinErr,  setPinErr]  = useState("");
+  const [err,     setErr]     = useState("");
 
   useEffect(() => {
-    if (!authInitialized) return;          // wait — auth token not confirmed yet
-    if (isLoading) return;
+    if (!ready) return;
     if (!user?.uid) { navigate("/login", { replace: true }); return; }
     if (user.familyId) { navigate("/dashboard", { replace: true }); return; }
 
-    const init = async (retries = 3) => {
-      try {
-        const snap     = await get(ref(db, `users/${user.uid}`));
-        const userData = snap.exists() ? snap.val() : {};
+    (async () => {
+      const userData = await getUser(user.uid, user.email);
+      if (userData.familyId) { navigate("/dashboard", { replace: true }); return; }
 
-        if (userData.familyId) { navigate("/dashboard", { replace: true }); return; }
+      if (userData.countryCode) setCc(userData.countryCode);
 
-        const mob = normalizeMobile(userData.mobile) || normalizeMobile(user.phoneNumber) || "";
-        if (mob) { setMobile(mob); await checkMob(mob); }
-        else setStage(STAGE.ASK_MOBILE);
-      } catch (e) {
-        if (retries > 0 && e.message?.toLowerCase().includes("permission")) {
-          await new Promise(r => setTimeout(r, 1000));
-          return init(retries - 1);
-        }
-        console.error("Onboarding init error:", e);
-        setError("Something went wrong. Please try again.");
-        setStage(STAGE.ASK_MOBILE);
-      }
-    };
-    init();
+      const storedMobile = userData.mobile || user.phoneNumber || "";
+      const key = toMobileKey(storedMobile);
+      if (key) { setMob10(key); await checkMobile(key); }
+      else setStage(S.ASK);
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, authInitialized, isLoading]);
+  }, [ready, user?.uid]);
 
-  const checkMob = async (mob, retries = 3) => {
-    setStage(STAGE.CHECKING);
-    setError("");
+  const checkMobile = async (key) => {
+    setStage(S.CHECKING);
+    setErr("");
     try {
-      const indexData = await checkMobileIndex(mob);
-      if (!indexData) { setStage(STAGE.NOT_FOUND); return; }
+      const idx = await getMobileIndex(key);
+      if (!idx) { setStage(S.NOTFOUND); return; }
 
-      const fid = indexData.familyId ||
-        (indexData.familyIds ? Object.keys(indexData.familyIds)[0] : null);
-      if (!fid) { setStage(STAGE.NOT_FOUND); return; }
+      const fid = idx.familyId || (idx.familyIds ? Object.keys(idx.familyIds)[0] : null);
+      if (!fid)  { setStage(S.NOTFOUND); return; }
 
-      const famSnap = await get(ref(db, `families/${fid}`));
-      if (!famSnap.exists()) { setStage(STAGE.NOT_FOUND); return; }
+      const fam = await rtdb.get(`families/${fid}`);
+      if (!fam)  { setStage(S.NOTFOUND); return; }
 
-      const famData = famSnap.val();
-      // Support both migrated format (memberId) and app format (memberIds map)
-      const mid = indexData.memberId ||
-        (indexData.memberIds ? Object.keys(indexData.memberIds)[0] : null);
-
-      let hName = famData.headName || "";
-      if (!hName && famData.headMemberId) {
-        const headSnap = await get(ref(db, `members/${famData.headMemberId}`));
-        if (headSnap.exists()) hName = headSnap.val().name || "";
+      const mid = idx.memberId || (idx.memberIds ? Object.keys(idx.memberIds)[0] : null);
+      let hName = fam.headName || "";
+      if (!hName && fam.headMemberId) {
+        hName = await rtdb.get(`members/${fam.headMemberId}/name`) || "";
       }
 
-      setFamily(famData);
-      setFamilyId(fid);
-      setMemberId(mid);
-      setHeadName(hName);
-      setStage(STAGE.FAMILY_FOUND);
+      setFamily(fam); setFamId(fid); setMemId(mid); setHead(hName);
+      setStage(S.FOUND);
     } catch (e) {
-      // Auth token may not have reached RTDB yet — retry with backoff
-      if (retries > 0 && e.message?.toLowerCase().includes("permission")) {
-        await new Promise(r => setTimeout(r, 1000));
-        return checkMob(mob, retries - 1);
-      }
-      console.error("mobileIndex check error:", e);
-      setError("Could not check your mobile. Please try again.");
-      setStage(STAGE.ASK_MOBILE);
+      console.error(e);
+      setErr("Could not check your mobile. Please try again.");
+      setStage(S.ASK);
     }
   };
 
   const handleMobileSubmit = async () => {
-    const digits = mobileInput.trim().replace(/\D/g, "").slice(-10);
-    if (digits.length < 10) { setError("Enter a valid 10-digit mobile number."); return; }
-    setMobile(digits);
-
-    // Save mobile to user node now so it's remembered on next login
-    try {
-      await batchWrite({
-        [`users/${user.uid}/mobile`]     : `${ccInput}${digits}`,
-        [`users/${user.uid}/countryCode`]: ccInput,
-      });
-    } catch (e) {
-      console.error("Mobile save error:", e);
-    }
-
-    await checkMob(digits);
+    const digits = numIn.replace(/\D/g, "").slice(-10);
+    if (digits.length < 10) { setErr("Enter a valid 10-digit mobile number."); return; }
+    const full = toFullMobile(cc, digits);
+    setMob10(digits);
+    // Save to user node
+    await rtdb.update(`users/${user.uid}`, { mobile: full, countryCode: cc });
+    await checkMobile(digits);
   };
 
   const handlePinSubmit = async () => {
-    setPinError("");
-    if (!pin.trim()) { setPinError("Enter the family PIN."); return; }
-    if (String(family.familyPin) !== pin.trim()) { setPinError("Incorrect PIN. Please try again."); return; }
+    setPinErr("");
+    if (!pin.trim()) { setPinErr("Enter the family PIN."); return; }
+    if (String(family.familyPin) !== pin.trim()) { setPinErr("Incorrect PIN."); return; }
 
-    setStage(STAGE.LINKING);
+    setStage(S.LINKING);
     try {
-     await linkUserToFamily({
-    uid:         user.uid,
-    familyId,
-    memberId,
-    mobile,              // ← keep 10 digits for mobileIndex lookup inside linkUserToFamily
-    fullMobile:  `${ccInput}${mobile}`,   // ← +919974021397 for saving to user node
-    email:       user.email,
-  });
+      await linkUserToFamily({
+        uid: user.uid, familyId: famId, memberId: memId,
+        fullMobile: toFullMobile(cc, mob10),
+        countryCode: cc,
+        email: user.email,
+      });
       navigate("/dashboard", { replace: true });
     } catch (e) {
-      console.error("Link family error:", e);
-      setPinError("Something went wrong. Please try again.");
-      setStage(STAGE.FAMILY_FOUND);
+      setPinErr("Something went wrong. Please try again.");
+      setStage(S.FOUND);
     }
   };
 
-  // Loading / Checking / Linking
-  if (!authInitialized || isLoading || [STAGE.LOADING, STAGE.CHECKING, STAGE.LINKING].includes(stage)) {
-    const msg = stage === STAGE.LOADING  ? "Setting up your account..." :
-                stage === STAGE.CHECKING ? "Looking up your family..."  :
-                                           "Linking you to your family...";
-    return <Spinner message={msg} />;
-  }
+  if (!ready || [S.LOADING, S.CHECKING, S.LINKING].includes(stage))
+    return <Spinner message={stage === S.CHECKING ? "Looking up your family…" : stage === S.LINKING ? "Linking your account…" : "Setting up…"} />;
 
-  if (stage === STAGE.NOT_FOUND) {
-    return (
-      <Card>
-        <div className="text-center py-4 space-y-4">
-          <div className="text-5xl">🏠</div>
-          <h2 className="text-lg font-bold" style={{ color: "#5A1020" }}>No Family Found</h2>
-          <p className="text-sm" style={{ color: "#9B6060" }}>
-            Your mobile number is not linked to any family yet.
-          </p>
-          <button onClick={() => navigate("/registration", { state: { mobile: `${ccInput}${mobile}` } })}
-            className="w-full py-3 rounded-xl text-sm font-bold text-white" style={{ background: "#7B1C2E" }}>
-            Register My Family →
-          </button>
-          <button onClick={() => setStage(STAGE.ASK_MOBILE)}
-            className="w-full py-2 rounded-xl text-sm font-semibold border-2"
-            style={{ borderColor: "#f0e6e6", color: "#7B1C2E" }}>
-            Try Different Mobile
-          </button>
-        </div>
-      </Card>
-    );
-  }
+  const CS = { border: `2px solid ${COLORS.border}`, fontSize: 16, color: COLORS.textPrimary };
 
-  if (stage === STAGE.ASK_MOBILE) {
-    return (
+  if (stage === S.ASK) return (
+    <div className="max-w-md mx-auto p-4 pt-8">
       <Card>
         <div className="text-center space-y-1 pb-2">
           <div className="w-14 h-14 rounded-full flex items-center justify-center text-2xl mx-auto mb-3"
             style={{ background: "#FDE8EC" }}>📱</div>
-          <h2 className="text-xl font-bold" style={{ color: "#5A1020" }}>Enter Your Mobile</h2>
-          <p className="text-sm" style={{ color: "#9B6060" }}>Welcome to Shree Visha Oswal Family</p>
+          <h2 className="text-xl font-bold" style={{ color: COLORS.primaryDark }}>Enter Your Mobile</h2>
+          <p className="text-sm" style={{ color: COLORS.textSecondary }}>We'll check if your family is registered</p>
         </div>
-
-        {error && (
-          <div className="px-4 py-3 rounded-xl text-xs font-semibold"
-            style={{ background: "#FDE8EC", color: "#7B1C2E" }}>⚠️ {error}</div>
-        )}
-
-        <MobileInput
-          countryCode={ccInput}
-          onCountryCodeChange={setCcInput}
-          number={mobileInput}
-          onNumberChange={setMobileInput}
-        />
-
-        <button onClick={handleMobileSubmit}
-          className="w-full py-3.5 rounded-xl text-sm font-bold text-white"
-          style={{ background: "#7B1C2E" }}>
-          Next→
-        </button>
-
+        {err && <p className="text-xs text-center font-semibold" style={{ color: COLORS.error }}>{err}</p>}
+        <MobileInput countryCode={cc} onCountryCodeChange={setCc} number={numIn} onNumberChange={setNumIn} />
+        <button onClick={handleMobileSubmit} className="w-full py-3.5 rounded-xl text-sm font-bold text-white"
+          style={{ background: COLORS.primary }}>Next →</button>
         <div className="text-center">
-          <button onClick={() => navigate("/registration", { state: { mobile: `${ccInput}${mobileInput}` } })}
-            className="text-xs" style={{ color: "#C9A84C" }}>
-            Skip — Register a new family instead
+          <button onClick={() => navigate("/registration")} className="text-xs" style={{ color: COLORS.gold }}>
+            Skip — Register a new family
           </button>
         </div>
       </Card>
-    );
-  }
+    </div>
+  );
 
-  if (stage === STAGE.FAMILY_FOUND) {
-    const memberCount = Object.keys(family?.members || {}).length;
-    return (
+  if (stage === S.NOTFOUND) return (
+    <div className="max-w-md mx-auto p-4 pt-8">
+      <Card>
+        <div className="text-center py-4 space-y-4">
+          <div className="text-5xl">🏠</div>
+          <h2 className="text-lg font-bold" style={{ color: COLORS.primaryDark }}>No Family Found</h2>
+          <p className="text-sm" style={{ color: COLORS.textSecondary }}>Your mobile is not linked to any family yet.</p>
+          <button onClick={() => navigate("/registration")}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white" style={{ background: COLORS.primary }}>
+            Register My Family →
+          </button>
+          <button onClick={() => setStage(S.ASK)}
+            className="w-full py-2 rounded-xl text-sm font-semibold border-2"
+            style={{ borderColor: COLORS.border, color: COLORS.primary }}>
+            Try Different Number
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+
+  if (stage === S.FOUND) return (
+    <div className="max-w-md mx-auto p-4 pt-8">
       <Card>
         <div className="flex items-center gap-3 p-4 rounded-2xl"
           style={{ background: "linear-gradient(135deg,#FDF0D0,#FDE8EC)" }}>
           <div className="w-12 h-12 rounded-full flex items-center justify-center text-xl flex-shrink-0"
-            style={{ background: "#7B1C2E", color: "#F0D080" }}>🏠</div>
+            style={{ background: COLORS.primary, color: COLORS.goldLight }}>🏠</div>
           <div>
-            <p className="text-xs font-semibold" style={{ color: "#C9A84C" }}>Family Found! ✅</p>
-            <p className="text-base font-bold" style={{ color: "#5A1020" }}>
-              {headName ? `${headName}'s Family` : "Your Family"}
+            <p className="text-xs font-semibold" style={{ color: COLORS.gold }}>Family Found! ✅</p>
+            <p className="text-base font-bold" style={{ color: COLORS.primaryDark }}>
+              {head ? `${head}'s Family` : "Your Family"}
             </p>
           </div>
         </div>
 
-        <div className="space-y-2">
-          {[
-            { label: "City",    value: family?.city    || "—" },
-            { label: "Members", value: `${memberCount} member${memberCount !== 1 ? "s" : ""}` },
-            { label: "PIN",     value: "****" },
-          ].map(row => (
-            <div key={row.label} className="flex justify-between py-2 border-b" style={{ borderColor: "#f0e6e6" }}>
-              <span className="text-xs" style={{ color: "#9B6060" }}>{row.label}</span>
-              <span className="text-xs font-semibold" style={{ color: "#3D0010" }}>{row.value}</span>
-            </div>
-          ))}
-        </div>
+        {[
+          { label: "City",    value: family.city || "—" },
+          { label: "Members", value: `${Object.keys(family.members || {}).length} members` },
+        ].map(row => (
+          <div key={row.label} className="flex justify-between py-2 border-b" style={{ borderColor: COLORS.border }}>
+            <span className="text-xs" style={{ color: COLORS.textSecondary }}>{row.label}</span>
+            <span className="text-xs font-semibold" style={{ color: COLORS.textPrimary }}>{row.value}</span>
+          </div>
+        ))}
 
         <div>
-          <p className="text-xs font-semibold mb-2" style={{ color: "#7B1C2E" }}>Enter Family PIN to join</p>
-          <PinInput value={pin} onChange={v => { setPin(v); setPinError(""); }} onSubmit={handlePinSubmit} error={pinError} />
+          <p className="text-xs font-semibold mb-2" style={{ color: COLORS.primary }}>Enter Family PIN</p>
+          <PinInput value={pin} onChange={v => { setPin(v); setPinErr(""); }} onSubmit={handlePinSubmit} error={pinErr} />
         </div>
 
         <button onClick={handlePinSubmit}
-          className="w-full py-3.5 rounded-xl text-sm font-bold text-white" style={{ background: "#7B1C2E" }}>
+          className="w-full py-3.5 rounded-xl text-sm font-bold text-white" style={{ background: COLORS.primary }}>
           Join Family ✓
         </button>
 
         <div className="flex gap-3">
-          <button onClick={() => setStage(STAGE.ASK_MOBILE)}
+          <button onClick={() => setStage(S.ASK)}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold border-2"
-            style={{ borderColor: "#f0e6e6", color: "#9B6060" }}>← Different Mobile</button>
+            style={{ borderColor: COLORS.border, color: COLORS.textSecondary }}>← Different Number</button>
           <button onClick={() => navigate("/registration")}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold border-2"
-            style={{ borderColor: "#f0e6e6", color: "#9B6060" }}>Not My Family</button>
+            style={{ borderColor: COLORS.border, color: COLORS.textSecondary }}>Not My Family</button>
         </div>
       </Card>
-    );
-  }
+    </div>
+  );
 
   return null;
 }

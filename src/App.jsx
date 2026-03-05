@@ -1,60 +1,65 @@
-import { Routes, Route, useNavigate } from "react-router-dom";
-import AppLayout from "./layouts/AppLayout";
-import PrivateRoute from "./components/PrivateRoute";
+// App.jsx — All routes defined here. One place, easy to scan.
+import { Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth }   from "./store/AuthContext";
+import AppLayout          from "./components/layout/AppLayout";
+import PrivateRoute       from "./components/layout/PrivateRoute";
+import Spinner            from "./components/ui/Spinner";
 
-import Home from "./pages/Home";
-import About from "./pages/About";
-import Contact from "./pages/Contact";
-import Registration from "./pages/FamilyRegistrationFlow";
-import Dashboard from "./pages/DashboardPage";
-import Students from "./pages/StudentsPage";
-import Profile from "./pages/ProfilePage";
-import JoinFamilyPage from "./pages/JoinFamilyPage";
-import LoginPage from "./pages/LoginPage";
-import RegistrationSuccess from "./pages/RegistrationSuccess";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
-import ConnectorsPage from "./pages/ConnectorsPage";
-import LeaderboardPage from "./pages/LeaderboardPage";
-import RegisterList from "./pages/RegisterList";
-import OnboardingPage from "./pages/OnboardingPage"
+// Pages
+import Home                   from "./pages/Home";
+import About                  from "./pages/About";
+import Contact                from "./pages/Contact";
+import LoginPage               from "./pages/LoginPage";
+import ForgotPasswordPage      from "./pages/ForgotPasswordPage";
+import OnboardingPage          from "./pages/OnboardingPage";
+import FamilyRegistrationFlow  from "./pages/FamilyRegistrationFlow";
+import RegistrationSuccess     from "./pages/RegistrationSuccess";
+import DashboardPage           from "./pages/DashboardPage";
+import ProfilePage             from "./pages/ProfilePage";
+import StudentsPage            from "./pages/StudentsPage";
+import ConnectorsPage          from "./pages/ConnectorsPage";
+import LeaderboardPage         from "./pages/LeaderboardPage";
+import RegisterList            from "./pages/RegisterList";
+import JoinFamilyPage          from "./pages/JoinFamilyPage";
 
-// ✅ DELETED: UniversalOnboardingPage, ContactOnboardingPage
+function AppRoutes() {
+  const { ready } = useAuth();
+  if (!ready) return <Spinner message="Loading…" />;
 
-function RegistrationWithNav() {
-  const navigate = useNavigate();
-  return <Registration onDone={() => navigate("/dashboard", { replace: true })} />;
+  return (
+    <Routes>
+      {/* Public shell */}
+      
+      <Route element={<AppLayout />}>
+        <Route path="/"           element={<Home />} />
+        <Route path="/about"      element={<About />} />
+        <Route path="/contact"    element={<Contact />} />
+        <Route path="/connectors" element={<ConnectorsPage />} />
+        <Route path="/login"      element={<LoginPage />} />
+        <Route path="/forgot"     element={<ForgotPasswordPage />} />
+        <Route path="/join"       element={<JoinFamilyPage />} />
+        <Route path="/leaderboard" element={<LeaderboardPage />} />
+        <Route path="/register-list" element={<RegisterList />} />
+
+        {/* Auth-required */}
+        <Route path="/onboarding"    element={<PrivateRoute><OnboardingPage /></PrivateRoute>} />
+        <Route path="/registration"  element={<PrivateRoute><FamilyRegistrationFlow /></PrivateRoute>} />
+        <Route path="/registration-success" element={<PrivateRoute><RegistrationSuccess /></PrivateRoute>} />
+        <Route path="/dashboard"     element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+        <Route path="/profile"       element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
+        <Route path="/students"      element={<PrivateRoute><StudentsPage /></PrivateRoute>} />
+      </Route>
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }
 
 export default function App() {
   return (
-    <Routes>
-
-      {/* ⭐ Layout Route */}
-      <Route element={<AppLayout />}>
-
-        {/* Public */}
-        <Route path="/"               element={<Home />} />
-        <Route path="/about"          element={<About />} />
-        <Route path="/contact"        element={<Contact />} />
-        <Route path="/registration"   element={<RegistrationWithNav />} />
-        <Route path="/login"          element={<LoginPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/connectors"     element={<ConnectorsPage />} />
-        <Route path="/leaderboard"    element={<LeaderboardPage />} />
-        <Route path="/join"           element={<JoinFamilyPage />} />
-        <Route path="/success"        element={<RegistrationSuccess />} />
-        <Route path="/register-list"  element={<RegisterList />} />
-
-        {/* ✅ NEW unified onboarding — replaces /onboarding and /contact-onboarding */}
-        <Route path="/onboarding"     element={<OnboardingPage />} />
-
-        {/* Private */}
-        <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-        <Route path="/students"  element={<PrivateRoute><Students /></PrivateRoute>} />
-        <Route path="/profile"   element={<PrivateRoute><Profile /></PrivateRoute>} />
-
-      </Route>
-
-    </Routes>
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   );
 }

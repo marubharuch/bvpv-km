@@ -11,7 +11,7 @@
  */
 
 import { ref, set, update, push, remove } from "firebase/database";
-import { db } from "../firebase";
+import { db } from  "../lib/firebase"
 
 // ─────────────────────────────────────────────
 // 🔧 PRIMITIVE WRITE HELPERS

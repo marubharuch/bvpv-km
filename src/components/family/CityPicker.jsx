@@ -1,100 +1,55 @@
-import { useState, useRef, useEffect } from "react";
-
-const CITIES = [
-  "AHMEDABAD","ANAND","BAKROL","BHARUCH","BHILAD","BORSAD",
-  "DABHOI","JITODIYA","KAVITHA","KHAMBHAT","MAHEMDABAD","MASAROD",
-  "MOGRI","MOTI SHERDI","MUMBAI","NAPAD","NAVSARI","ODE","PADRA",
-  "PETLAD","SURAT","VADODARA","VALLABH VIDYANAGAR","VALVOD","VAPI",
-  "VATADARA","CANADA","USA","UK","AUSTRALIA","OTHER",
-];
+import { useState } from "react";
+import { CITIES, COLORS } from "../../constants/app";
 
 export function CityPicker({ onSelect }) {
-  const [query, setQuery]       = useState("");
-  const [open, setOpen]         = useState(false);
-  const [hi, setHi]             = useState(0);
-  const inputRef                = useRef(null);
+  const [custom, setCustom] = useState("");
+  const [mode,   setMode]   = useState("grid"); // "grid" | "custom"
 
-  const filtered = query.trim()
-    ? CITIES.filter((c) => c.includes(query.toUpperCase()))
-    : CITIES;
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
-  useEffect(() => { setHi(0); }, [query]);
-
-  function select(city) {
-    setQuery(city);
-    setOpen(false);
-    onSelect(city);
-  }
-
-  function onKeyDown(e) {
-    if (!open) { setOpen(true); return; }
-    if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(h + 1, filtered.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); filtered[hi] && select(filtered[hi]); }
-    else if (e.key === "Escape") setOpen(false);
-  }
+  const handleCustom = () => {
+    const t = custom.trim();
+    if (t) onSelect(t.toUpperCase());
+  };
 
   return (
-    <div className="p-6 pb-8">
-      {/* Header */}
-      <span className="inline-block text-xs font-bold tracking-widest text-green-700 bg-green-50 px-3 py-1 rounded-full mb-3 uppercase">
-        Step 1 of 3
-      </span>
-      <h2 className="text-2xl font-extrabold text-gray-900 mb-1">Where is your family from?</h2>
-      <p className="text-sm text-gray-500 mb-5">Select your native village or city</p>
-
-      {/* Input */}
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg pointer-events-none">📍</span>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Search native / city…"
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          onKeyDown={onKeyDown}
-          autoComplete="off"
-          className="w-full pl-10 pr-9 py-3.5 text-sm font-semibold bg-gray-50 border-2 border-gray-200 rounded-xl outline-none transition focus:border-green-500 focus:bg-white focus:ring-4 focus:ring-green-100"
-        />
-        {query && (
-          <button
-            className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-gray-200 text-gray-500 text-xs flex items-center justify-center hover:bg-gray-300"
-            onClick={() => { setQuery(""); setOpen(true); inputRef.current?.focus(); }}
-          >✕</button>
-        )}
+    <div className="p-5 space-y-4">
+      <div>
+        <span className="inline-block text-xs font-bold tracking-widest px-3 py-1 rounded-full mb-3"
+          style={{ background: `${COLORS.primary}15`, color: COLORS.primary }}>Step 1 of 3</span>
+        <h2 className="text-2xl font-extrabold" style={{ color: COLORS.textPrimary }}>Select Your City</h2>
+        <p className="text-sm mt-1" style={{ color: COLORS.textSecondary }}>Where does your family live?</p>
       </div>
 
-      {/* Dropdown */}
-      {open && filtered.length > 0 && (
-        <ul className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
-          {filtered.map((city, i) => (
-            <li
-              key={city}
-              className={`flex items-center gap-3 px-4 py-2.5 text-sm font-semibold cursor-pointer transition ${
-                i === hi ? "bg-green-50 text-green-800" : "text-gray-700 hover:bg-gray-50"
-              }`}
-              onMouseDown={() => select(city)}
-              onMouseEnter={() => setHi(i)}
-            >
-              <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-              {city}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {open && filtered.length === 0 && (
-        <div className="mt-2 p-4 text-center text-sm text-gray-400 border border-dashed border-gray-200 rounded-xl">
-          No match —{" "}
-          <button
-            className="text-green-600 font-bold underline"
-            onMouseDown={() => { const v = query.trim().toUpperCase(); if (v) select(v); }}
-          >
-            use "{query.trim().toUpperCase()}"
+      {mode === "grid" ? (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            {CITIES.map(city => (
+              <button key={city} onClick={() => onSelect(city)}
+                className="py-3 px-2 rounded-xl text-sm font-bold text-center border-2 transition-all active:scale-95"
+                style={{ border: `2px solid ${COLORS.border}`, color: COLORS.primary, background: "#fff" }}>
+                {city}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setMode("custom")}
+            className="w-full py-3 rounded-xl text-sm font-semibold border-2"
+            style={{ borderColor: COLORS.border, color: COLORS.textSecondary }}>
+            + Enter Other City
           </button>
+        </>
+      ) : (
+        <div className="space-y-3">
+          <input autoFocus value={custom} onChange={e => setCustom(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleCustom()}
+            placeholder="Type city name..." className="w-full rounded-xl px-4 py-3 outline-none"
+            style={{ border: `2px solid ${COLORS.gold}`, fontSize: 16, color: COLORS.textPrimary }} />
+          <div className="flex gap-2">
+            <button onClick={() => setMode("grid")}
+              className="flex-1 py-3 rounded-xl text-sm font-semibold border-2"
+              style={{ borderColor: COLORS.border, color: COLORS.textSecondary }}>← Back</button>
+            <button onClick={handleCustom} disabled={!custom.trim()}
+              className="flex-1 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-40"
+              style={{ background: COLORS.primary }}>Continue →</button>
+          </div>
         </div>
       )}
     </div>

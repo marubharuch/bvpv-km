@@ -5,10 +5,11 @@
  * Deadline: /config/registrationDeadline
  */
 
-import { useState, useEffect, useContext, useCallback } from "react";
+import { useAuth } from "../store/AuthContext";
+import { useState, useEffect, useCallback } from "react";
 import { ref, get } from "firebase/database";
-import { db } from "../firebase";
-import { AuthContext } from "../context/AuthContext";
+import { db } from "../lib/firebase";
+//import { useAuth } from "../store/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 const medal   = (i) => ["🥇", "🥈", "🥉"][i] ?? `#${i + 1}`;
@@ -17,7 +18,7 @@ const fmtDate = (ms) => ms
   : "—";
 
 export default function LeaderboardPage() {
-  const { user } = useContext(AuthContext);
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [tab,         setTab]         = useState("upload");

@@ -4,7 +4,7 @@
  */
 
 import { ref, get } from "firebase/database";
-import { db } from "../firebase";
+import { db }    from  "../lib/firebase"  
 import { batchWrite, writePath, updatePath } from "./rtdbService";
 import { userSchema } from "../schema/schema";
 import { emailToKey } from "../utils/emailKey";

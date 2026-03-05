@@ -1,8 +1,8 @@
-// src/components/ui/ErrorBanner.jsx
 export default function ErrorBanner({ message }) {
   if (!message) return null;
   return (
-    <div className="mx-5 mt-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-xs font-semibold text-red-600">
+    <div className="mx-4 mt-2 px-4 py-3 rounded-xl text-sm font-semibold"
+      style={{ background: "#FDE8EC", color: "#7B1C2E", border: "1px solid #f0c0c0" }}>
       ⚠️ {message}
     </div>
   );

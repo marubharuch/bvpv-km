@@ -6,7 +6,7 @@
  * FIX BUG 9: auto-mark contacts[0] as isSelf if none tagged
  */
 import { ref, get, push } from "firebase/database";
-import { db } from "../firebase";
+import { db } from  "../lib/firebase"
 import { batchWrite } from "./rtdbService";
 import { memberSchema, familySchema } from "../schema/schema";
 import { normalizeMobile } from "../utils/normalizePhone";

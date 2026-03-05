@@ -11,7 +11,7 @@
  *                         ?v=timestamp for immediate cache bust
  */
 import { ref, get, push } from "firebase/database";
-import { db } from "../firebase";
+import { db } from  "../lib/firebase"
 import { batchWrite, updatePath } from "./rtdbService";
 import { memberSchema, honoraryIndexSchema } from "../schema/schema";
 import { normalizeMobile } from "../utils/normalizePhone";

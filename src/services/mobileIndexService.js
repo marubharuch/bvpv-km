@@ -4,7 +4,7 @@
  */
 
 import { ref, get } from "firebase/database";
-import { db } from "../firebase";
+import { db } from  "../lib/firebase"   
 import { batchWrite } from "./rtdbService";
 import { normalizeMobile } from "../utils/normalizePhone";
 

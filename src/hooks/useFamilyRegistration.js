@@ -1,87 +1,67 @@
+// hooks/useFamilyRegistration.js
 import { useState, useEffect, useCallback } from "react";
+import { genId } from "../lib/text";
 
-const STORAGE_KEY = "family_reg_draft";
+const KEY = "family_reg_draft";
+const STEPS = { CITY: "city", CONTACTS: "contacts", REORDER: "reorder" };
+const init  = { step: STEPS.CITY, city: "", contacts: [] };
 
-export const STEPS = {
-  CITY:     "city",
-  CONTACTS: "contacts",
-  REORDER:  "reorder",
-  SUCCESS:  "success",
-};
+const persist = s => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
+const load    = ()  => { try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; } };
+const clear   = ()  => { try { localStorage.removeItem(KEY); } catch {} };
 
-const initial = { step: STEPS.CITY, city: "", contacts: [] };
-
-function load() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; }
-  catch { return null; }
-}
-function save(s) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {}
-}
-function clear() {
-  try { localStorage.removeItem(STORAGE_KEY); } catch {}
-}
-function uid() {
-  return `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-}
+export { STEPS };
 
 export function useFamilyRegistration() {
-  const [state, setState] = useState(() => load() || initial);
+  const [state, setState] = useState(() => load() || init);
 
-  useEffect(() => {
-    if (state.step !== STEPS.SUCCESS) save(state);
-  }, [state]);
+  useEffect(() => { if (state.step !== "success") persist(state); }, [state]);
 
-  const set = useCallback((patch) => setState((s) => ({ ...s, ...patch })), []);
+  const patch = useCallback(p => setState(s => ({ ...s, ...p })), []);
 
-  const setCity = useCallback((city) => set({ city, step: STEPS.CONTACTS }), [set]);
+  const setCity     = useCallback(city    => patch({ city, step: STEPS.CONTACTS }), [patch]);
+  const goToReorder = useCallback(()       => patch({ step: STEPS.REORDER }),       [patch]);
+  const reorder     = useCallback(contacts => patch({ contacts }),                  [patch]);
+  const goBack      = useCallback(()       => setState(s => ({
+    ...s, step: s.step === STEPS.CONTACTS ? STEPS.CITY : STEPS.CONTACTS,
+  })), []);
 
-  const addContact = useCallback((name, phone) =>
-    setState((s) => ({
+  const addContacts = useCallback(list => setState(s => {
+    const existing = new Set(s.contacts.map(c => c.phone));
+    const fresh = list
+      .filter(c => c.name || c.phone || c.mobile)
+      .filter(c => !existing.has(c.phone || c.mobile))
+      .map(c => ({
+        id:          genId(),
+        name:        (c.name   || "").trim(),
+        phone:       (c.phone  || c.mobile || "").trim(),
+        countryCode: c.countryCode || "+91",
+        isSelf:      c.isSelf || false,
+      }));
+    return { ...s, contacts: [...s.contacts, ...fresh] };
+  }), []);
+
+  const addContact = useCallback((name, phone, countryCode = "+91") =>
+    setState(s => ({
       ...s,
-      contacts: [...s.contacts, { id: uid(), name: name.trim(), phone: phone.trim() }],
+      contacts: [...s.contacts, { id: genId(), name: name.trim(), phone: phone.trim(), countryCode }],
     })), []);
-
-  const addContacts = useCallback((list) =>
-    setState((s) => {
-      const existing = new Set(s.contacts.map((c) => c.phone));
-      const fresh = list
-        .filter((c) => c.name || c.phone)
-        .filter((c) => !existing.has(c.phone))
-        // ⭐ FIX: safe fallback — phone/name may be undefined from contact picker
-        // ⭐ normalize: picker returns 'mobile', manual returns 'phone' — unify to 'phone'
-        .map((c) => ({ id: uid(), name: (c.name || "").trim(), phone: (c.phone || c.mobile || "").trim() }));
-      return { ...s, contacts: [...s.contacts, ...fresh] };
-    }), []);
 
   const updateContact = useCallback((id, field, value) =>
-    setState((s) => ({
+    setState(s => ({
       ...s,
-      contacts: s.contacts.map((c) => c.id === id ? { ...c, [field]: value } : c),
+      contacts: s.contacts.map(c => c.id === id ? { ...c, [field]: value } : c),
     })), []);
 
-  const removeContact = useCallback((id) =>
-    setState((s) => ({ ...s, contacts: s.contacts.filter((c) => c.id !== id) })), []);
+  const removeContact = useCallback(id =>
+    setState(s => ({ ...s, contacts: s.contacts.filter(c => c.id !== id) })), []);
 
-  const goToReorder = useCallback(() => set({ step: STEPS.REORDER }), [set]);
-  const goBack = useCallback(() =>
-    setState((s) => ({
-      ...s,
-      step: s.step === STEPS.CONTACTS ? STEPS.CITY : STEPS.CONTACTS,
-    })), []);
-
-  const reorder = useCallback((contacts) => set({ contacts }), [set]);
-
-  const onSuccess = useCallback(() => {
-    clear();
-    set({ step: STEPS.SUCCESS });
-  }, [set]);
-
-  const reset = useCallback(() => { clear(); setState(initial); }, []);
+  const onSuccess = useCallback(() => { clear(); patch({ step: "success" }); }, [patch]);
+  const reset     = useCallback(() => { clear(); setState(init); }, []);
 
   return {
     step: state.step, city: state.city, contacts: state.contacts,
     setCity, addContact, addContacts, updateContact, removeContact,
-    goToReorder, goBack, reorder, onSuccess, reset,
+    goToReorder, goBack, reorder, onSuccess, reset, STEPS,
   };
 }

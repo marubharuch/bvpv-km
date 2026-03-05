@@ -1,53 +1,43 @@
 import { useState, useRef, useEffect } from "react";
+import MobileInput from "../ui/MobileInput";
+import { COLORS }  from "../../constants/app";
 
 export function ContactCard({ contact, index, onUpdate, onRemove, autoFocus }) {
-  const [name, setName]   = useState(contact.name);
-  const [phone, setPhone] = useState(contact.phone);
-  const nameRef           = useRef(null);
+  const [name, setName] = useState(contact.name  || "");
+  const nameRef         = useRef(null);
 
   useEffect(() => { if (autoFocus) setTimeout(() => nameRef.current?.focus(), 60); }, [autoFocus]);
-  useEffect(() => { setName(contact.name); },  [contact.name]);
-  useEffect(() => { setPhone(contact.phone); }, [contact.phone]);
+  useEffect(() => { setName(contact.name || ""); }, [contact.name]);
 
-  const commitName  = () => { const t = name.trim();  if (t !== contact.name)  onUpdate(contact.id, "name",  t); };
-  const commitPhone = () => { const t = phone.trim(); if (t !== contact.phone) onUpdate(contact.id, "phone", t); };
+  const commitName = () => {
+    const t = name.trim();
+    if (t !== contact.name) onUpdate(contact.id, "name", t);
+  };
 
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-2xl p-3.5 focus-within:border-green-400 focus-within:bg-white transition">
-      {/* Header row */}
+    <div className="rounded-2xl p-3.5 border-2 transition-all"
+      style={{ border: `2px solid ${COLORS.border}`, background: "#fafafa" }}>
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[10px] font-black tracking-widest text-gray-400 uppercase">
+        <span className="text-[10px] font-black tracking-widest uppercase" style={{ color: COLORS.textMuted }}>
           Contact {index + 1}
+          {contact.isSelf && <span className="ml-2 normal-case font-semibold" style={{ color: "#3b82f6" }}>👤 You</span>}
         </span>
-        <button
-          onClick={() => onRemove(contact.id)}
-          className="text-xs font-bold text-red-500 border border-red-300 rounded-full px-3 py-0.5 hover:bg-red-50 transition"
-        >
-          Remove
-        </button>
+        <button onClick={() => onRemove(contact.id)}
+          className="text-xs font-bold px-3 py-0.5 rounded-full border transition-colors"
+          style={{ color: COLORS.error, borderColor: "#fca5a5" }}>Remove</button>
       </div>
-
-      {/* Fields */}
-      <div className="flex gap-2">
-        <input
-          ref={nameRef}
-          type="text"
-          placeholder="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={commitName}
-          className="flex-[1.4] min-w-0 px-3 py-2.5 text-sm font-semibold text-gray-900 bg-white border border-gray-200 rounded-xl outline-none transition focus:border-green-400 focus:ring-2 focus:ring-green-100 placeholder:text-gray-400 placeholder:font-normal"
-        />
-        <input
-          type="tel"
-          placeholder="Mobile"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          onBlur={commitPhone}
-          inputMode="tel"
-          className="flex-1 min-w-0 px-3 py-2.5 text-sm font-semibold text-gray-900 bg-white border border-gray-200 rounded-xl outline-none transition focus:border-green-400 focus:ring-2 focus:ring-green-100 placeholder:text-gray-400 placeholder:font-normal"
-        />
-      </div>
+      <input ref={nameRef} type="text" placeholder="Full Name" value={name}
+        onChange={e => setName(e.target.value)} onBlur={commitName}
+        className="w-full px-3 py-2.5 mb-2 text-sm font-semibold rounded-xl outline-none"
+        style={{ border: `1px solid ${COLORS.border}`, fontSize: 16, color: COLORS.textPrimary, background: "#fff" }} />
+      <MobileInput
+        countryCode={contact.countryCode || "+91"}
+        onCountryCodeChange={v => onUpdate(contact.id, "countryCode", v)}
+        number={contact.phone || ""}
+        onNumberChange={v => onUpdate(contact.id, "phone", v)}
+        placeholder="Mobile number"
+        maxLength={15}
+      />
     </div>
   );
 }
