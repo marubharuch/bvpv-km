@@ -1,21 +1,33 @@
-// db/memberDb.js
-// members node mobile = ALWAYS fullMobile "+91XXXXXXXXXX"
+// db/memberDb.js — All reads/writes for `members` node.
+// mobile = ALWAYS fullMobile "+91XXXXXXXXXX"
 
-import { rtdb }                    from "./rtdb";
-import { memberDoc, honoraryIndexDoc } from "./schema";
-import { toFullMobile, toMobileKey }   from "../lib/phone";
+import { rtdb }                          from "./rtdb";
+import { memberDoc, honoraryIndexDoc }   from "./schema";
+import { toFullMobile, toMobileKey }     from "../lib/phone";
 import { checkDuplicateMobile, buildMobileIndexWrites } from "./mobileIndexDb";
-import { HONORARY_ORGS }           from "../constants/app";
+import { invalidateFamilyCache }         from "./familyDb";
+import { HONORARY_ORGS }                 from "../constants/app";
 
 const ALL_ORG_IDS = HONORARY_ORGS.map(o => o.id);
 
+/** Fetch a single member. */
+export async function getMember(memberId) {
+  if (!memberId) return null;
+  return rtdb.get(`members/${memberId}`);
+}
+
+/**
+ * Save (create or update) a member.
+ * Used by useMemberForm — handles mobile normalization, duplicate check,
+ * mobileIndex writes, and honoraryIndex updates in one place.
+ */
 export async function saveMember({ memberId, familyId, payload, isAdding, existingMember = {} }) {
   const ts  = Date.now();
   const cc  = payload.countryCode || "+91";
 
   // payload.mobile may be 10-digit input from form — normalize to fullMobile
   const full = payload.mobile
-    ? toFullMobile(cc, payload.mobile)   // always "+91XXXXXXXXXX"
+    ? toFullMobile(cc, payload.mobile)
     : "";
 
   // ── Duplicate check ───────────────────────────────────────────
@@ -28,19 +40,14 @@ export async function saveMember({ memberId, familyId, payload, isAdding, existi
   }
 
   // ── Clean payload — mobile is always fullMobile ───────────────
-  const clean = {
-    ...payload,
-    mobile:      full,        // "+91XXXXXXXXXX" — no more 10-digit on member node
-    countryCode: cc,
-  };
-  delete clean.fullMobile;    // no separate field needed — mobile IS full
+  const clean = { ...payload, mobile: full, countryCode: cc };
+  delete clean.fullMobile;
 
   // ── Write member node ─────────────────────────────────────────
   // Writing to members/$memberId uses a cross-node security rule that checks
   // root.child('users').child(auth.uid).child('familyId') == members/$memberId/familyId.
-  // Root-level batch writes break this rule evaluation, so we:
-  //   1. Write the member node directly (path-scoped → rule evaluates cleanly)
-  //   2. Batch everything else (families, mobileIndex, honoraryIndex — simpler rules)
+  // Root-level batch writes break this rule, so member node is written directly,
+  // everything else (families, mobileIndex, honoraryIndex) goes in a batch.
   const sideWrites = {};
 
   if (isAdding) {
@@ -79,15 +86,22 @@ export async function saveMember({ memberId, familyId, payload, isAdding, existi
   }
 
   if (Object.keys(sideWrites).length) await rtdb.batch(sideWrites);
+
+  // Invalidate family cache so dashboard re-fetches fresh data
+  if (familyId) await invalidateFamilyCache(familyId);
+
   return memberId;
 }
 
+/**
+ * Update member photo URL + honoraryIndex entries.
+ * Called from PhotoUpload component.
+ */
 export async function updateMemberPhoto(memberId, photoURL, honoraryOrgs = []) {
   const ts = Date.now();
 
   await rtdb.update(`members/${memberId}`, { photoURL, updatedAt: ts });
 
-  // honoraryIndex has simple auth != null rules — batch is safe
   const honoraryWrites = {};
   (honoraryOrgs || []).forEach(entry => {
     if (!entry.orgId || !entry.post) return;

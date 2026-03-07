@@ -1,6 +1,5 @@
 // db/mobileIndexDb.js
-// KEY = toMobileKey(fullMobile) = "+919974021397"  ← full number as key
-// No more 10-digit keys anywhere.
+// KEY = toMobileKey(fullMobile) = "+919974021397" — full number as key
 
 import { rtdb }        from "./rtdb";
 import { toMobileKey } from "../lib/phone";
@@ -34,8 +33,6 @@ export async function checkDuplicateMobile(mobile, ownFamilyId = null) {
 
 /**
  * Build mobileIndex writes for a batch.
- * key = "+919974021397"  (full number — clean, no encoding needed)
- *
  * @param {string} fullMobile   "+919974021397"
  * @param {string} countryCode  "+91"
  * @param {object} extra        { memberId, familyId, isUser, userUid, source }
@@ -45,7 +42,6 @@ export function buildMobileIndexWrites(fullMobile, countryCode, extra = {}) {
   if (!key) return {};
 
   const writes = {};
-  // key IS the full number — no need to store separately
   writes[`mobileIndex/${key}/countryCode`] = countryCode || "+91";
 
   if (extra.memberId) writes[`mobileIndex/${key}/memberIds/${extra.memberId}`] = true;

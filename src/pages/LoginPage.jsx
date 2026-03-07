@@ -1,27 +1,26 @@
 // pages/LoginPage.jsx
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect }   from "react";
+import { useNavigate }           from "react-router-dom";
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail,
+  GoogleAuthProvider, signInWithPopup,
 } from "firebase/auth";
-import { ensureUser } from "../db/userDb";
-import { toFullMobile } from "../lib/phone";
-import { COLORS }     from "../constants/app";
-import MobileInput    from "../components/ui/MobileInput";
-import { useAuth }    from "../store/AuthContext";
+import { ensureUser }            from "../db/userDb";
+import { toFullMobile }          from "../lib/phone";
+import { friendlyAuthError }     from "../lib/firebaseErrors";
+import { COLORS }                from "../constants/app";
+import MobileInput               from "../components/ui/MobileInput";
+import { useAuth }               from "../store/AuthContext";
 
 export default function LoginPage() {
-  const navigate = useNavigate();
-  const auth     = getAuth();
-  const { user, ready } = useAuth();
+  const navigate        = useNavigate();
+  const auth            = getAuth();
+  const { user, ready, refreshUser } = useAuth();
 
-  // Redirect already-logged-in users away from the login page
+  // Redirect already-logged-in users (page refresh / direct visit to /login)
   useEffect(() => {
     if (!ready) return;
-    if (user) {
-      navigate(user.familyId ? "/dashboard" : "/registration", { replace: true });
-    }
+    if (user) navigate(user.familyId ? "/dashboard" : "/registration", { replace: true });
   }, [user, ready, navigate]);
 
   const [tab,  setTab]  = useState("login");
@@ -33,41 +32,38 @@ export default function LoginPage() {
   const [err,  setErr]  = useState("");
   const [busy, setBusy] = useState(false);
 
-  const go = async fn => {
+  const run = async (fn) => {
     setBusy(true); setErr("");
-    try {
-      await fn();
-      // Navigation is handled by the useEffect above watching AuthContext user state
-    } catch (e) {
-      setErr(e.message.replace("Firebase: ", "").replace(/\(.*\)/, "").trim());
-    } finally {
-      setBusy(false);
-    }
+    try   { await fn(); }
+    catch (e) { setErr(friendlyAuthError(e)); }  // clean error messages
+    finally   { setBusy(false); }
   };
 
-  const loginEmail   = () => go(() => signInWithEmailAndPassword(auth, email, pass));
+  const loginEmail    = () => run(() => signInWithEmailAndPassword(auth, email, pass));
 
-  const registerEmail = () => go(async () => {
+  const registerEmail = () => run(async () => {
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
     const full = mob ? toFullMobile(cc, mob) : "";
     await ensureUser(cred.user, { displayName: name.trim(), mobile: full, countryCode: cc });
-    return cred;
+    await refreshUser();  // mobile AuthContext માં update થાય — FamilyRegistrationFlow ને ફરી prompt નહીં આવે
+    navigate("/registration", { replace: true });
   });
 
-  const loginGoogle = () => go(async () => {
+  const loginGoogle = () => run(async () => {
     const cred = await signInWithPopup(auth, new GoogleAuthProvider());
     await ensureUser(cred.user);
-    return cred;
+    // Check familyId from RTDB directly — AuthContext may not be updated yet
+    const { getUser } = await import("../db/userDb");
+    const userData = await getUser(cred.user.uid, cred.user.email);
+    navigate(userData?.familyId ? "/dashboard" : "/registration", { replace: true });
   });
 
   const forgotPass = async () => {
     if (!email) { setErr("Enter your email first."); return; }
-    try {
-      await sendPasswordResetEmail(auth, email);
-      setErr("✅ Password reset email sent!");
-    } catch (e) {
-      setErr(e.message.replace("Firebase: ", "").replace(/\(.*\)/, "").trim());
-    }
+    const { sendPasswordResetEmail } = await import("firebase/auth");
+    run(() => sendPasswordResetEmail(auth, email).then(() =>
+      setErr("✅ Password reset email sent!")
+    ));
   };
 
   const inputStyle = {
@@ -101,7 +97,7 @@ export default function LoginPage() {
         <div className="flex-1 h-px" style={{ background: COLORS.border }} />
       </div>
 
-      {/* Email / password tabs */}
+      {/* Tab switcher */}
       <div className="flex rounded-xl overflow-hidden border-2" style={{ borderColor: COLORS.border }}>
         {["login", "register"].map(t => (
           <button key={t} onClick={() => { setTab(t); setErr(""); }}
@@ -144,8 +140,7 @@ export default function LoginPage() {
         </p>
       )}
 
-      <button
-        onClick={tab === "login" ? loginEmail : registerEmail}
+      <button onClick={tab === "login" ? loginEmail : registerEmail}
         disabled={busy}
         className="w-full py-3.5 rounded-xl text-sm font-bold text-white disabled:opacity-60"
         style={{ background: COLORS.primary }}>

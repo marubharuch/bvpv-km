@@ -1,5 +1,4 @@
-// db/registrationDb.js
-// Family registration — one atomic batch write.
+// db/registrationDb.js — Family registration in one atomic batch write.
 // mobile on ALL nodes = fullMobile "+91XXXXXXXXXX"
 
 import { push, ref }              from "firebase/database";
@@ -47,12 +46,11 @@ export async function registerFamily({ city, contacts, user }) {
 
     const raw  = contact.phone || contact.mobile || "";
     const cc   = contact.countryCode || splitMobile(raw).countryCode || "+91";
-    const full = raw ? toFullMobile(cc, raw) : "";   // "+91XXXXXXXXXX"
+    const full = raw ? toFullMobile(cc, raw) : "";
 
-    // ── Member node: mobile = fullMobile ──────────────────────
     writes[`members/${memberId}`] = memberDoc({
       name:        contact.name.trim(),
-      mobile:      full,          // fullMobile — always
+      mobile:      full,
       countryCode: cc,
       native:      city,
       isHead:      index === 0,
@@ -62,7 +60,6 @@ export async function registerFamily({ city, contacts, user }) {
       createdAt:   ts,
     });
 
-    // ── mobileIndex: key=10-digit, inside=full ────────────────
     if (full) {
       Object.assign(writes, buildMobileIndexWrites(full, cc, {
         memberId, familyId, source: "familyRegistration",
@@ -79,7 +76,7 @@ export async function registerFamily({ city, contacts, user }) {
   });
   writes[`familiesByPin/${familyPin}`] = familyId;
 
-  // ── User node: link to family ─────────────────────────────
+  // Link user to family
   if (user?.uid) {
     const self = members.find(c => c.isSelf);
     const raw  = self?.phone || self?.mobile || "";
@@ -88,7 +85,7 @@ export async function registerFamily({ city, contacts, user }) {
 
     writes[`users/${user.uid}/familyId`]    = familyId;
     writes[`users/${user.uid}/memberId`]    = selfMemberId;
-    writes[`users/${user.uid}/mobile`]      = full;    // fullMobile on user too
+    writes[`users/${user.uid}/mobile`]      = full;
     writes[`users/${user.uid}/countryCode`] = cc;
     writes[`users/${user.uid}/role`]        = "member";
     writes[`users/${user.uid}/status`]      = "active";

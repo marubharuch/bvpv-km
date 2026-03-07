@@ -1,18 +1,18 @@
 // db/userDb.js
 // mobile on users node = ALWAYS fullMobile "+91XXXXXXXXXX"
 
-import { rtdb }                  from "./rtdb";
-import { userDoc }               from "./schema";
-import { emailToKey }            from "../lib/text";
-import { toMobileKey, toFullMobile } from "../lib/phone";
-import { buildMobileIndexWrites } from "./mobileIndexDb";
+import { rtdb }                          from "./rtdb";
+import { userDoc }                       from "./schema";
+import { emailToKey }                    from "../lib/text";
+import { toMobileKey, toFullMobile }     from "../lib/phone";
+import { buildMobileIndexWrites }        from "./mobileIndexDb";
 
 /** Create user node if it doesn't exist yet. */
 export async function ensureUser(firebaseUser, extra = {}) {
   if (!firebaseUser?.uid) return;
 
   const cc          = extra.countryCode || "+91";
-  const full        = extra.mobile      || null;   // must be fullMobile if provided
+  const full        = extra.mobile      || null;  // must be fullMobile if provided
   const displayName = extra.displayName || firebaseUser.displayName || null;
 
   const existing = await rtdb.get(`users/${firebaseUser.uid}`);
@@ -33,9 +33,8 @@ export async function ensureUser(firebaseUser, extra = {}) {
       }));
     }
     await rtdb.batch(writes);
-
   } else {
-    // User node exists — patch any missing fields without overwriting existing data
+    // Patch missing fields without overwriting existing data
     const writes = {};
     if (displayName && !existing.displayName)
       writes[`users/${firebaseUser.uid}/displayName`] = displayName;
@@ -50,7 +49,7 @@ export async function ensureUser(firebaseUser, extra = {}) {
   }
 }
 
-/** Save mobile to an existing user node (called after mobile prompt). */
+/** Save mobile to existing user node (called after mobile prompt). */
 export async function saveUserMobile(uid, fullMobile, countryCode = "+91") {
   if (!uid || !fullMobile) return;
   const writes = {};
@@ -85,7 +84,7 @@ export async function linkUserToFamily({ uid, familyId, memberId, fullMobile, co
   writes[`users/${uid}/role`]        = "member";
   writes[`users/${uid}/status`]      = "active";
   if (memberId)   writes[`users/${uid}/memberId`]    = memberId;
-  if (fullMobile) writes[`users/${uid}/mobile`]      = fullMobile;  // fullMobile always
+  if (fullMobile) writes[`users/${uid}/mobile`]      = fullMobile;
   if (cc)         writes[`users/${uid}/countryCode`] = cc;
 
   if (memberId) {
@@ -98,15 +97,14 @@ export async function linkUserToFamily({ uid, familyId, memberId, fullMobile, co
 
   if (fullMobile) {
     Object.assign(writes, buildMobileIndexWrites(fullMobile, cc, {
-      isUser: true, userUid: uid,
-      memberId, familyId,
+      isUser: true, userUid: uid, memberId, familyId,
     }));
     // Mark connector as joined
-    const connKey = toMobileKey(fullMobile);  // still full number
-    const conn  = await rtdb.get(`connectors/${connKey}`);
+    const connKey = toMobileKey(fullMobile);
+    const conn    = await rtdb.get(`connectors/${connKey}`);
     if (conn) {
       writes[`connectors/${connKey}/joinedUserId`] = uid;
-      writes[`connectors/${connKey}/joinedAt`]   = ts;
+      writes[`connectors/${connKey}/joinedAt`]     = ts;
     }
   }
 

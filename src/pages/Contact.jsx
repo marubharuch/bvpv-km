@@ -1,4 +1,6 @@
 import { useState } from "react";
+import hss from "../assets/hss.jpg";
+import sgs from "../assets/sgs.jpg";
 
 export default function About() {
   const [lang, setLang] = useState("guj");
@@ -114,14 +116,16 @@ export default function About() {
           <div className="px-4 py-4 space-y-3" style={{ background: "#fff8ee" }}>
 
             <DevCard
-              photo="/hss.jpg"
+              photo={hss}
               name="Hetavi Shah"
               role="IT Professional"
               desc="Working in Business Analytics & Business Intelligence domain in the IT industry."
             />
+              
+       
 
             <DevCard
-              photo="/hss2.jpg"
+              photo={sgs }
               name="Sanjay Shah"
               role="Hobby Programmer"
               desc="Technology enthusiast contributing to planning and development of this project."

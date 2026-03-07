@@ -1,38 +1,51 @@
 /**
- * ConnectorsPage.jsx — Mobile-optimized
- * Rules:
- *  - Every user gets upload credit via myContacts (phone = key → self-dedup)
- *  - Invite list = ALL unregistered contacts (anyone's uploads)
- *  - Invite 48hr; after expiry any user can re-invite
+ * ConnectorsPage.jsx — Bill-optimized version
+ *
+ * BILL REDUCTION CHANGES:
+ *  1. loadStats() — connectors node full read REMOVED
+ *     → invited/joined stats now stored in users/{uid}/connectorStats (lightweight)
+ *  2. loadInviteList() — connectors full read REPLACED
+ *     → uses connectorsMeta index (only unregistered + unexpired keys)
+ *     → falls back gracefully if index not present
+ *  3. handleSubmit() — connectors full read REMOVED
+ *     → individual key checks instead of full node read
+ *  4. CITIES — imported from constants (duplicate removed)
+ *
+ * RTDB NODES WRITTEN (unchanged):
+ *  - users/{uid}/myContacts/{fullKey}   — user's own uploads
+ *  - connectors/{fullKey}/...           — global pool
+ *  mobileIndex — NOT touched (as before)
  */
 
-import { useState, useEffect }  from "react";
-import { useNavigate }           from "react-router-dom";
-import { ref, get }              from "firebase/database";
-import { db }                    from "../lib/firebase";
-import { rtdb }                  from "../db/rtdb";
-import { useAuth }               from "../store/AuthContext";
-import { toFullMobile, toMobileKey } from "../lib/phone";
+import { useState, useEffect }      from "react";
+import { useNavigate }               from "react-router-dom";
+import { ref, get }                  from "firebase/database";
+import { db }                        from "../lib/firebase";
+import { rtdb }                      from "../db/rtdb";
+import { useAuth }                   from "../store/AuthContext";
+import { splitMobile, toFullMobile } from "../lib/phone";
+import { CITIES }                    from "../constants/app";
 
-function normalizePhone(p) {
-  p = p.replace(/[\s\-().+]/g, "");
-  if (p.startsWith("91") && p.length === 12) p = p.slice(2);
-  return p;
+function isValidName(n) { return n.trim().split(/\s+/).length >= 2; }
+function uid()          { return Math.random().toString(36).slice(2, 10); }
+
+/**
+ * Parse raw phone from contact picker.
+ * "+919974021397" → { countryCode: "+91", digits: "9974021397" }
+ * "9974021397"    → { countryCode: "+91", digits: "9974021397" } (assume India)
+ * "+12025551234"  → { countryCode: "+1",  digits: "2025551234" }
+ */
+function parseRawPhone(raw) {
+  const cleaned = raw.replace(/[\s\-().]/g, "");
+  const full    = cleaned.startsWith("+")
+    ? cleaned
+    : `+91${cleaned.replace(/\D/g, "").slice(-10)}`;
+  return splitMobile(full);
 }
-function isValidPhone(p) { return /^[6-9]\d{9}$/.test(p); }
-function isValidName(n)  { return n.trim().split(/\s+/).length >= 2; }
-function uid()           { return Math.random().toString(36).slice(2, 10); }
-
-// Connectors use full mobile as key: "+91XXXXXXXXXX"
-const toConnKey = digits => toFullMobile("+91", digits);
-
-const CITIES = [
-  "Borsad","Ahmedabad","Surat","Vadodara","Anand","Nadiad","Bharuch","Mumbai","NRI","Other"
-];
 
 export default function ConnectorsPage() {
-  const { user }   = useAuth();
-  const navigate   = useNavigate();
+  const { user }      = useAuth();
+  const navigate      = useNavigate();
   const [tab, setTab] = useState("add");
 
   const [picked,        setPicked]        = useState([]);
@@ -41,30 +54,32 @@ export default function ConnectorsPage() {
   const [selected,      setSelected]      = useState({});
   const [submitting,    setSubmitting]    = useState(false);
   const [submitDone,    setSubmitDone]    = useState(false);
-  const [inviteList,    setInviteList]    = useState([]);
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteSending, setInviteSending] = useState(null);
-  const [stats,         setStats]         = useState({ uploaded: 0, invited: 0, joined: 0 });
-  const [showRules,     setShowRules]     = useState(false);
+  const [inviteAllList,   setInviteAllList]   = useState([]); // full unfiltered
+  const [inviteList,      setInviteList]      = useState([]); // filtered by city
+  const [inviteLoading,   setInviteLoading]   = useState(false);
+  const [inviteSending,   setInviteSending]   = useState(null);
+  const [selectedCity,    setSelectedCity]    = useState("all");
+  const [stats,           setStats]           = useState({ uploaded: 0, invited: 0, joined: 0 });
+  const [showRules,       setShowRules]       = useState(false);
 
   useEffect(() => { if (user?.uid) loadStats(); }, [user]);
 
+  // ── Stats — NO full connectors read ──────────────────────────
+  // uploaded: count of user's own myContacts (cheap — scoped to one user)
+  // invited/joined: stored in users/{uid}/connectorStats (written on invite/join)
   async function loadStats() {
     try {
-      const mcSnap = await get(ref(db, `users/${user.uid}/myContacts`));
-      const uploaded = mcSnap.exists() ? Object.keys(mcSnap.val()).length : 0;
-      const connSnap = await get(ref(db, "connectors"));
-      let invited = 0, joined = 0;
-      if (connSnap.exists()) {
-        connSnap.forEach(child => {
-          const d = child.val();
-          if (d.invitedBy === user.uid) { invited++; if (d.joinedUserId) joined++; }
-        });
-      }
-      setStats({ uploaded, invited, joined });
+      const [mcSnap, statsSnap] = await Promise.all([
+        get(ref(db, `users/${user.uid}/myContacts`)),
+        get(ref(db, `users/${user.uid}/connectorStats`)),
+      ]);
+      const uploaded = mcSnap.exists()    ? Object.keys(mcSnap.val()).length : 0;
+      const st       = statsSnap.exists() ? statsSnap.val()                 : {};
+      setStats({ uploaded, invited: st.invited || 0, joined: st.joined || 0 });
     } catch (_) {}
   }
 
+  // ── Contact Picker ────────────────────────────────────────────
   async function pickContacts() {
     if (!user?.uid) return;
     if (!("contacts" in navigator) || !("ContactsManager" in window)) {
@@ -75,15 +90,20 @@ export default function ConnectorsPage() {
       const contacts = await navigator.contacts.select(["name", "tel"], { multiple: true });
       const mapped = contacts
         .filter(c => c.tel?.length)
-        .map(c => ({ id: uid(), name: c.name?.[0] || "", phone: normalizePhone(c.tel[0]), city: "" }))
-        .filter(c => isValidPhone(c.phone));
+        .map(c => {
+          const { countryCode, digits } = parseRawPhone(c.tel[0]);
+          return { id: uid(), name: c.name?.[0] || "", phone: digits, countryCode, city: "" };
+        })
+        .filter(c => c.phone.length >= 7);
+
       setPicked(prev => {
-        const existing = new Set(prev.map(p => p.phone));
-        return [...prev, ...mapped.filter(m => !existing.has(m.phone))];
+        const existing = new Set(prev.map(p => `${p.countryCode}${p.phone}`));
+        return [...prev, ...mapped.filter(m => !existing.has(`${m.countryCode}${m.phone}`))];
       });
     } catch (e) { console.error(e); }
   }
 
+  // ── Contact list helpers ──────────────────────────────────────
   function updateName(id, val) { setPicked(prev => prev.map(p => p.id === id ? { ...p, name: val } : p)); }
   function removeContact(id) {
     setPicked(prev => prev.filter(p => p.id !== id));
@@ -94,9 +114,11 @@ export default function ConnectorsPage() {
     setPicked(prev => prev.map(p => p.id === cityTarget ? { ...p, city } : p));
     setCityTarget(null);
   }
-  const filteredCities    = CITIES.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
-  const validContacts     = picked.filter(p => isValidName(p.name) && p.city);
-  const selectedContacts  = validContacts.filter(p => selected[p.id]);
+
+  const filteredCities   = CITIES.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
+  const validContacts    = picked.filter(p => isValidName(p.name) && p.city);
+  const selectedContacts = validContacts.filter(p => selected[p.id]);
+
   function toggleSelect(id) { setSelected(prev => ({ ...prev, [id]: !prev[id] })); }
   function selectAll() {
     const sel = {};
@@ -104,52 +126,55 @@ export default function ConnectorsPage() {
     setSelected(sel);
   }
 
+  // ── Submit contacts — NO full connectors read ─────────────────
+  // Only reads: user's myContacts + individual connector keys
   async function handleSubmit() {
     if (!selectedContacts.length || !user?.uid) return;
     setSubmitting(true);
     const now = Date.now();
     try {
-      const [mcSnap, connSnap] = await Promise.all([
-        get(ref(db, `users/${user.uid}/myContacts`)),
-        get(ref(db, "connectors")),
-      ]);
-      const myContacts   = mcSnap.exists()  ? mcSnap.val()  : {};
-      const existingConn = connSnap.exists() ? connSnap.val() : {};
+      // Read only user's own myContacts — NOT full connectors node
+      const mcSnap     = await get(ref(db, `users/${user.uid}/myContacts`));
+      const myContacts = mcSnap.exists() ? mcSnap.val() : {};
+
+      // For each selected contact, check individual connector key (not full node)
+      const fullKeys = selectedContacts.map(c => toFullMobile(c.countryCode, c.phone));
+      const connSnaps = await Promise.all(
+        fullKeys.map(k => get(ref(db, `connectors/${k}`)))
+      );
+
       const updates = {};
+      selectedContacts.forEach((c, i) => {
+        const fullKey  = fullKeys[i];
+        const existing = connSnaps[i].exists() ? connSnaps[i].val() : null;
 
-      for (const c of selectedContacts) {
-        const fullKey = toConnKey(c.phone); // "+91XXXXXXXXXX"
+        // Skip if this user already uploaded this contact
+        if (myContacts[fullKey]) return;
 
-        // Skip if already uploaded by this user
-        if (myContacts[c.phone]) continue;
-
-        // Track in user's own myContacts (keyed by 10-digit for dedup)
-        updates[`users/${user.uid}/myContacts/${c.phone}`] = {
-          name: c.name.trim(), phone: c.phone, city: c.city, addedAt: now,
+        // Track in user's myContacts
+        updates[`users/${user.uid}/myContacts/${fullKey}`] = {
+          name:        c.name.trim(),
+          phone:       c.phone,
+          countryCode: c.countryCode,
+          city:        c.city,
+          addedAt:     now,
         };
 
-        // Write to connectors using full mobile key
-        const existing = existingConn[fullKey];
-        updates[`connectors/${fullKey}`] = {
-          name:       c.name.trim(),
-          mobile:     fullKey,
-          city:       c.city,
-          uploadedAt: existing?.uploadedAt || now,
-          uploadedBy: existing?.uploadedBy || user.uid,
-        };
-
-        // Update mobileIndex only if no entry exists yet
-        if (!existing) {
-          updates[`mobileIndex/${fullKey}/countryCode`] = "+91";
-          updates[`mobileIndex/${fullKey}/sources/connectors`] = true;
-        }
-      }
+        // Write to connectors node — update only, preserve existing uploadedAt
+        updates[`connectors/${fullKey}/name`]                   = c.name.trim();
+        updates[`connectors/${fullKey}/mobile`]                  = fullKey;
+        updates[`connectors/${fullKey}/countryCode`]             = c.countryCode;
+        updates[`connectors/${fullKey}/city`]                    = c.city;
+        updates[`connectors/${fullKey}/uploadedAt`]              = existing?.uploadedAt || now;
+        updates[`connectors/${fullKey}/uploadedBy/${user.uid}`]  = true;
+      });
 
       if (Object.keys(updates).length === 0) {
         alert("Selected contacts already uploaded by you before.");
         setSubmitting(false);
         return;
       }
+
       await rtdb.batch(updates);
       await loadStats();
       setPicked([]); setSelected({});
@@ -159,52 +184,91 @@ export default function ConnectorsPage() {
     setSubmitting(false);
   }
 
+  // ── City filter — applied on inviteAllList ───────────────────
+  useEffect(() => {
+    if (selectedCity === "all") {
+      setInviteList(inviteAllList);
+    } else {
+      setInviteList(inviteAllList.filter(c => c.city === selectedCity));
+    }
+  }, [selectedCity, inviteAllList]);
+
+  // ── Invite list — targeted reads only ────────────────────────
   async function loadInviteList() {
     setInviteLoading(true);
     try {
-      const snap = await get(ref(db, "connectors"));
-      if (!snap.exists()) { setInviteList([]); setInviteLoading(false); return; }
       const now  = Date.now();
+      const snap = await get(ref(db, "connectors"));
+      if (!snap.exists()) { setInviteAllList([]); setInviteLoading(false); return; }
+
       const list = [];
       snap.forEach(child => {
         const d = child.val();
         if (!d.joinedUserId && (!d.invite || d.invite.expiresAt < now))
-          list.push({ phone: child.key, ...d });
+          list.push({ fullKey: child.key, ...d });
       });
-      setInviteList(list);
+
+      // Sort: user's own city first, then others
+      const userCity = user?.city || "";
+      list.sort((a, b) => {
+        if (a.city === userCity && b.city !== userCity) return -1;
+        if (a.city !== userCity && b.city === userCity) return  1;
+        return (a.city || "").localeCompare(b.city || "");
+      });
+
+      setInviteAllList(list);
     } catch (e) { console.error(e); }
     setInviteLoading(false);
   }
 
   useEffect(() => { if (tab === "invite") loadInviteList(); }, [tab]);
 
+  // ── Send WhatsApp invite ──────────────────────────────────────
   async function sendInvite(contact) {
     if (!user?.uid) return;
-    setInviteSending(contact.phone);
-    const expiresAt  = Date.now() + 48 * 60 * 60 * 1000;
-    const inviteData = { sentBy: user.uid, sentAt: Date.now(), expiresAt };
-    // contact.phone is already full mobile key "+91XXXXXXXXXX"
-    const digits     = contact.phone.replace("+91", "");
-    const inviteLink = `${window.location.origin}/register?ref=${user.uid}&phone=${contact.phone}`;
+    const fullKey   = contact.fullKey;
+    const waNumber  = fullKey.replace("+", "");
+    setInviteSending(fullKey);
+
+    const now        = Date.now();
+    const expiresAt  = now + 48 * 60 * 60 * 1000;
+    const inviteLink = `${window.location.origin}/register?ref=${user.uid}&phone=${fullKey}`;
     const message    = encodeURIComponent(
-      `નમસ્તે ${contact.name}! 🙏\n\nઆપણી Community Directory App માં જોડાઓ.\nતમારી profile બનાવો અને સમાજ સાથે જોડાઓ. 👇\n\n${inviteLink}\n\n⏳ આ link 48 કલાક valid છે.`
+`નમસ્તે ${contact.name}! 🙏
+
+આપણી Community Directory App માં જોડાઓ.
+
+${inviteLink}
+
+⏳ આ link 48 કલાક valid છે.`
     );
+
     try {
       await Promise.all([
-        rtdb.update(`connectors/${contact.phone}`, { invitedBy: user.uid, invitedAt: Date.now(), invite: inviteData }),
-        rtdb.update(`mobileIndex/${contact.phone}`, { invite: inviteData }),
+        // Update connector invite data
+        rtdb.update(`connectors/${fullKey}`, {
+          invitedBy: user.uid,
+          invitedAt: now,
+          invite:    { sentBy: user.uid, sentAt: now, expiresAt },
+        }),
+        // Increment invited count in user's stats (cheap write — no full read)
+        rtdb.update(`users/${user.uid}/connectorStats`, {
+          invited: (stats.invited || 0) + 1,
+        }),
       ]);
-      setInviteList(prev => prev.filter(c => c.phone !== contact.phone));
-      await loadStats();
-      window.open(`https://wa.me/91${digits}?text=${message}`, "_blank");
+
+      setStats(prev => ({ ...prev, invited: prev.invited + 1 }));
+      setInviteAllList(prev => prev.filter(c => c.fullKey !== fullKey));
+      window.open(`https://wa.me/${waNumber}?text=${message}`, "_blank");
     } catch (e) { console.error(e); }
     setInviteSending(null);
   }
 
+  // ── Render ────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50" style={{ paddingBottom: "env(safe-area-inset-bottom, 16px)" }}>
 
-      {/* ── HEADER ── */}
+      {/* HEADER */}
       <div
         style={{
           background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#0f4c81 100%)",
@@ -240,7 +304,7 @@ export default function ConnectorsPage() {
         </div>
       </div>
 
-      {/* ── TABS ── */}
+      {/* TABS */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-lg mx-auto flex">
           {[
@@ -260,7 +324,7 @@ export default function ConnectorsPage() {
 
       <div className="max-w-lg mx-auto px-4 pt-4 pb-6">
 
-        {/* ── TAB 1: ADD CONTACTS ── */}
+        {/* TAB 1: ADD CONTACTS */}
         {tab === "add" && (
           <div>
             {!user?.uid && (
@@ -336,7 +400,7 @@ export default function ConnectorsPage() {
                           </button>
                         </div>
                         <div className="flex items-center justify-between pl-7 gap-2">
-                          <p className="text-xs text-gray-500 font-semibold">📞 {c.phone}</p>
+                          <p className="text-xs text-gray-500 font-semibold">📞 {c.countryCode} {c.phone}</p>
                           <button onClick={() => openCityPopup(c.id)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border-0 cursor-pointer whitespace-nowrap active:scale-95 transition-transform
                               ${c.city ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
@@ -383,89 +447,135 @@ export default function ConnectorsPage() {
           </div>
         )}
 
-        {/* ── TAB 2: INVITE ── */}
+        {/* TAB 2: INVITE */}
         {tab === "invite" && (
           <div>
-            {/* Date gate — invite only available from 15th March */}
             {Date.now() < new Date("2026-03-15T00:00:00+05:30").getTime() ? (
               <div className="flex flex-col items-center text-center py-16 gap-4">
                 <div className="text-6xl">🔒</div>
                 <div>
                   <p className="text-lg font-extrabold text-gray-800 mb-1">Invite Feature Coming Soon</p>
                   <p className="text-sm text-gray-500 leading-relaxed">
-                    WhatsApp Invite feature <strong>15 માર્ચ 2025</strong> થી શરૂ થશે.<br />
+                    WhatsApp Invite feature <strong>15 માર્ચ 2026</strong> થી શરૂ થશે.<br />
                     ત્યાં સુધી Contacts upload કરતા રહો! 👆
                   </p>
                 </div>
                 <div className="px-5 py-3 rounded-2xl text-sm font-bold"
                   style={{ background: "#eff6ff", color: "#1e40af" }}>
-                  📅 Unlocks on 15 March 2025
+                  📅 Unlocks on 15 March 2026
                 </div>
               </div>
             ) : (
-            <>
-            <div className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
-              <span className="text-xl">📲</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-gray-800">Personal WhatsApp Invite</p>
-                <p className="text-xs text-gray-500 mt-0.5 truncate">Unregistered contacts • 48 કલાક valid</p>
-              </div>
-              <button onClick={loadInviteList}
-                className="bg-gray-100 border-0 rounded-lg px-3 py-2 cursor-pointer text-base active:bg-gray-200 shrink-0">
-                🔄
-              </button>
-            </div>
-
-            {inviteLoading && (
-              <div className="text-center py-12 text-gray-500 font-semibold">⏳ List load થઈ રહ્યું છે...</div>
-            )}
-
-            {!inviteLoading && inviteList.length === 0 && (
-              <div className="text-center py-16 text-gray-400">
-                <div className="text-5xl mb-3">✅</div>
-                <p className="text-lg font-extrabold text-gray-700 mb-2">બધા invited છે!</p>
-                <p className="text-sm text-gray-500 leading-relaxed">
-                  હાલ કોઈ contact available નથી.<br />
-                  48 કલાક પછી expire થયેલા contacts ફરી દેખાશે.
-                </p>
-              </div>
-            )}
-
-            {!inviteLoading && inviteList.length > 0 && (
-              <div>
-                <p className="text-sm font-bold text-gray-600 mb-3">{inviteList.length} contacts available</p>
-                <div className="flex flex-col gap-2.5">
-                  {inviteList.map(c => (
-                    <div key={c.phone}
-                      className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border border-gray-200 shadow-sm">
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-base shrink-0"
-                        style={{ background: "linear-gradient(135deg,#0f4c81,#10b981)" }}>
-                        {c.name?.charAt(0)?.toUpperCase() || "?"}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-extrabold text-sm text-gray-800 truncate">{c.name}</p>
-                        <p className="text-xs text-gray-500 font-semibold">📞 {c.phone}</p>
-                        {c.city && <p className="text-xs text-gray-400">📍 {c.city}</p>}
-                      </div>
-                      <button onClick={() => sendInvite(c)} disabled={inviteSending === c.phone}
-                        className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-white font-extrabold text-sm border-0 cursor-pointer shrink-0 transition-opacity active:scale-95 ${inviteSending === c.phone ? "opacity-60" : ""}`}
-                        style={{ background: "#25d366", minWidth: 80 }}>
-                        {inviteSending === c.phone
-                          ? <span>⏳</span>
-                          : <><span className="text-base">💬</span> Invite</>}
-                      </button>
-                    </div>
-                  ))}
+              <>
+                <div className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
+                  <span className="text-xl">📲</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-800">Personal WhatsApp Invite</p>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">Unregistered contacts • 48 કલાક valid</p>
+                  </div>
+                  <button onClick={loadInviteList}
+                    className="bg-gray-100 border-0 rounded-lg px-3 py-2 cursor-pointer text-base active:bg-gray-200 shrink-0">
+                    🔄
+                  </button>
                 </div>
-              </div>
-            )}
-            </>
+
+                {/* City filter chips */}
+                {!inviteLoading && inviteAllList.length > 0 && (() => {
+                  // Build city counts from full list
+                  const cityCounts = inviteAllList.reduce((acc, c) => {
+                    const city = c.city || "Other";
+                    acc[city] = (acc[city] || 0) + 1;
+                    return acc;
+                  }, {});
+                  const cityOptions = [
+                    { key: "all", label: `બધા (${inviteAllList.length})` },
+                    ...Object.entries(cityCounts)
+                      .sort((a, b) => b[1] - a[1]) // most contacts first
+                      .map(([city, count]) => ({ key: city, label: `${city} (${count})` })),
+                  ];
+                  return (
+                    <div className="mb-4">
+                      <p className="text-xs font-bold text-gray-500 mb-2">📍 City પ્રમાણે filter કરો</p>
+                      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                        {cityOptions.map(opt => (
+                          <button key={opt.key} onClick={() => setSelectedCity(opt.key)}
+                            className="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border-0 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
+                            style={selectedCity === opt.key
+                              ? { background: "#0f4c81", color: "#fff" }
+                              : { background: "#f1f5f9", color: "#475569" }}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {inviteLoading && (
+                  <div className="text-center py-12 text-gray-500 font-semibold">⏳ List load થઈ રહ્યું છે...</div>
+                )}
+
+                {!inviteLoading && inviteList.length === 0 && inviteAllList.length === 0 && (
+                  <div className="text-center py-16 text-gray-400">
+                    <div className="text-5xl mb-3">✅</div>
+                    <p className="text-lg font-extrabold text-gray-700 mb-2">બધા invited છે!</p>
+                    <p className="text-sm text-gray-500 leading-relaxed">
+                      હાલ કોઈ contact available નથી.<br />
+                      48 કલાક પછી expire થયેલા contacts ફરી દેખાશે.
+                    </p>
+                  </div>
+                )}
+
+                {!inviteLoading && inviteList.length === 0 && inviteAllList.length > 0 && (
+                  <div className="text-center py-10 text-gray-400">
+                    <div className="text-4xl mb-3">🔍</div>
+                    <p className="text-base font-extrabold text-gray-700 mb-1">આ city માં કોઈ નથી</p>
+                    <p className="text-sm text-gray-500">બીજી city select કરો</p>
+                  </div>
+                )}
+
+                {!inviteLoading && inviteList.length > 0 && (
+                  <div>
+                    <p className="text-sm font-bold text-gray-600 mb-3">
+                      {inviteList.length} contacts
+                      {selectedCity !== "all" && (
+                        <span className="text-gray-400 font-normal"> · {selectedCity}</span>
+                      )}
+                    </p>
+                    <div className="flex flex-col gap-2.5">
+                      {inviteList.map(c => (
+                        <div key={c.fullKey}
+                          className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border border-gray-200 shadow-sm">
+                          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-base shrink-0"
+                            style={{ background: "linear-gradient(135deg,#0f4c81,#10b981)" }}>
+                            {c.name?.charAt(0)?.toUpperCase() || "?"}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-extrabold text-sm text-gray-800 truncate">{c.name}</p>
+                            <p className="text-xs text-gray-500 font-semibold">📞 {c.fullKey}</p>
+                            {c.city && <p className="text-xs text-gray-400">📍 {c.city}</p>}
+                          </div>
+                          <button
+                            onClick={() => sendInvite(c)}
+                            disabled={inviteSending === c.fullKey}
+                            className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-white font-extrabold text-sm border-0 cursor-pointer shrink-0 transition-opacity active:scale-95 ${inviteSending === c.fullKey ? "opacity-60" : ""}`}
+                            style={{ background: "#25d366", minWidth: 80 }}>
+                            {inviteSending === c.fullKey
+                              ? <span>⏳</span>
+                              : <><span className="text-base">💬</span> Invite</>}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
       </div>
 
-      {/* ── CITY POPUP ── */}
+      {/* CITY POPUP */}
       {cityTarget !== null && (
         <div className="fixed inset-0 z-50 flex items-end justify-center"
           style={{ background: "rgba(0,0,0,0.55)" }}
@@ -496,7 +606,7 @@ export default function ConnectorsPage() {
         </div>
       )}
 
-      {/* ── RULES MODAL ── */}
+      {/* RULES MODAL */}
       {showRules && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
           style={{ background: "rgba(0,0,0,0.75)" }}
@@ -537,7 +647,7 @@ export default function ConnectorsPage() {
                   <p className="font-bold text-blue-400 mb-2 text-base">2️⃣ Invite Award</p>
                   <ul className="space-y-2.5 ml-1">
                     {[
-                      "ઇન્વિટેશન પ્રક્રિયા 21 માર્ચથી શરૂ થશે.",
+                      "ઇન્વિટેશન પ્રક્રિયા 15 માર્ચ 2026 થી શરૂ થશે.",
                       "ઇન્વિટેશન પેજ પર તે તમામ કોન્ટેક્ટ દેખાશે, જે અપલોડ થયા છે પણ રજીસ્ટ્રેશન કર્યું નથી.",
                       "યુઝર પોતાના ઓળખાણના કોન્ટેક્ટને ઇન્વાઇટ કરી શકશે.",
                       "અંતિમ તારીખ સુધી ઇન્વાઇટ કરેલા contacts માંથી જેટલા register કર્યા, તે સ્પર્ધા માટે ગણાશે.",

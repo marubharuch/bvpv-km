@@ -57,9 +57,7 @@ export function useMemberForm({ open, mode, member, familyId, onClose }) {
       if (!member) return;
 
       // Parse stored mobile correctly
-      const { countryCode, digits } = member.countryCode
-        ? { countryCode: member.countryCode, digits: (member.mobile || "").replace(/\D/g, "").slice(-10) }
-        : splitMobile(member.mobile || "");
+    const { countryCode, digits } = splitMobile(member.mobile || "");
 
       const [dobDay = "", dobMonth = "", dobYear = ""] = (member.dob || "").split("/");
 

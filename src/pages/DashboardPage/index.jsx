@@ -1,17 +1,42 @@
-// pages/DashboardPage.jsx
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate }       from "react-router-dom";
-import { useAuth }           from "../store/AuthContext";
-import { getFamilyWithMembers, updateFamily } from "../db/familyDb";
-import { cache }             from "../lib/cache";
-import { toProperCase }      from "../lib/text";
-import { COLORS }            from "../constants/app";
-import EditMemberModal       from "../components/member/EditMemberModal";
-import PhotoUpload           from "../components/member/PhotoUpload";
-import Spinner               from "../components/ui/Spinner";
-import OnboardingTour        from "../components/layout/OnboardingTour";
-import { DASHBOARD_TOUR_STEPS } from "../constants/tourSteps";
+// pages/DashboardPage/index.jsx
+// Improvements:
+//  - useFamily hook replaces manual cache logic (cleaner, reusable)
+//  - Skeleton loader instead of full-page spinner
+//  - updateFamily now invalidates cache automatically (familyDb.js)
+//  - InlineField, calcCompletion, memberSubtitle extracted below for readability
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate }         from "react-router-dom";
+import { useAuth }             from "../../store/AuthContext";
+import { useFamily }           from "../../hooks/useFamily";
+import { updateFamily }        from "../../db/familyDb";
+import { toProperCase }        from "../../lib/text";
+import { COLORS }              from "../../constants/app";
+import EditMemberModal         from "../../components/member/EditMemberModal";
+import PhotoUpload             from "../../components/member/PhotoUpload";
+import OnboardingTour          from "../../components/layout/OnboardingTour";
+import { DASHBOARD_TOUR_STEPS } from "../../constants/tourSteps";
 import { Plus, RefreshCw, ChevronRight, Phone, MapPin, Pencil } from "lucide-react";
+
+// ── Skeleton loader ───────────────────────────────────────────────
+function DashboardSkeleton() {
+  return (
+    <div className="max-w-md mx-auto pb-24 animate-pulse">
+      <div className="h-36 rounded-b-2xl mb-4" style={{ background: "rgba(90,16,32,0.15)" }} />
+      <div className="px-4 space-y-3">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="bg-white rounded-xl p-3 flex gap-3" style={{ opacity: 1 - i * 0.2 }}>
+            <div className="w-14 h-14 rounded-full bg-gray-200 flex-shrink-0" />
+            <div className="flex-1 space-y-2 pt-1">
+              <div className="h-3 bg-gray-200 rounded w-2/3" />
+              <div className="h-2 bg-gray-100 rounded w-1/2" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ── Inline editable field ─────────────────────────────────────────
 function InlineField({ icon, value, placeholder, onSave, uppercase = false }) {
@@ -64,8 +89,9 @@ function InlineField({ icon, value, placeholder, onSave, uppercase = false }) {
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────────────
 function calcCompletion(family, members) {
-  const head = members.find(m => m.isHead) || members[0];
+  const head   = members.find(m => m.isHead) || members[0];
   const checks = [!!family.city, !!family.native, !!family.address, members.length > 1, !!head?.mobile, !!head?.gender, !!head?.dob];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 }
@@ -79,18 +105,28 @@ function memberSubtitle(m) {
   return parts.join(" · ") || "Member";
 }
 
+// ── Main component ────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user }   = useAuth();
   const navigate   = useNavigate();
-  const [family,        setFamily]        = useState(null);
-  const [familyId,      setFamilyId]      = useState(null);
-  const [loading,       setLoading]       = useState(true);
+
+  // useFamily hook — handles cache, loading, refresh automatically
+  const { family, members, loading, refresh } = useFamily(user?.familyId);
+
+  const [familyData,    setFamilyData]    = useState(null);
+  const [memberList,    setMemberList]    = useState([]);
   const [editingMember, setEditingMember] = useState(null);
   const [showAdd,       setShowAdd]       = useState(false);
   const [activeTab,     setActiveTab]     = useState("all");
   const [dashTour,      setDashTour]      = useState(false);
 
-  // ── Dashboard tour ─────────────────────────────────────────────
+  // Sync hook data into local state for optimistic updates
+  useEffect(() => {
+    if (family)  setFamilyData(family);
+    if (members) setMemberList(members);
+  }, [family, members]);
+
+  // Dashboard tour
   useEffect(() => {
     const navDone  = localStorage.getItem("appTourDone");
     const dashDone = localStorage.getItem("dashTourDone");
@@ -105,60 +141,19 @@ export default function DashboardPage() {
     setDashTour(false);
   };
 
-  const CACHE_KEY = user?.uid ? `dash:family:${user.uid}` : null;
-
-  const loadFamily = useCallback(async (force = false) => {
-    if (!user) { setLoading(false); return; }
-
-    // familyId comes from AuthContext — no extra RTDB call needed
-    const famId = user?.familyId;
-    if (!famId) { setLoading(false); return; }
-
-    // ── Serve cache instantly, refresh in background ──────────────
-    if (!force && CACHE_KEY) {
-      const cached = await cache.get(CACHE_KEY);
-      if (cached) {
-        setFamily(cached.family);
-        setFamilyId(cached.familyId);
-        setLoading(false);
-        // Silent background refresh — user sees data instantly
-        getFamilyWithMembers(famId).then(async result => {
-          if (result) {
-            setFamily(result);
-            await cache.set(CACHE_KEY, { family: result, familyId: famId });
-          }
-        });
-        return;
-      }
-    }
-
-    // ── No cache — show spinner and load fresh ────────────────────
-    setLoading(true);
-    const result = await getFamilyWithMembers(famId);
-    if (result) {
-      if (CACHE_KEY) await cache.set(CACHE_KEY, { family: result, familyId: famId });
-      setFamilyId(famId);
-      setFamily(result);
-    }
-    setLoading(false);
-  }, [user, CACHE_KEY]);
-
-  useEffect(() => { loadFamily(); }, [loadFamily]);
-
-  const patchFamily = useCallback(async fn => {
-    const updated = fn(family);
-    setFamily(updated);
-    if (CACHE_KEY) await cache.set(CACHE_KEY, { family: updated, familyId });
-  }, [family, familyId, CACHE_KEY]);
+  // Optimistic update helper — updates local state immediately
+  const patchMember = useCallback((id, data) => {
+    setMemberList(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
+  }, []);
 
   const saveField = async (field, value) => {
-    await updateFamily(familyId, { [field]: value });
-    await patchFamily(f => ({ ...f, [field]: value }));
+    setFamilyData(prev => ({ ...prev, [field]: value })); // optimistic
+    await updateFamily(user?.familyId, { [field]: value }); // cache invalidated inside
   };
 
-  if (loading) return <Spinner message="Loading your family..." />;
+  if (loading && !familyData) return <DashboardSkeleton />;
 
-  if (!family) return (
+  if (!familyData) return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: COLORS.bg }}>
       <div className="text-center space-y-4">
         <div className="text-5xl">👨‍👩‍👧</div>
@@ -171,22 +166,21 @@ export default function DashboardPage() {
     </div>
   );
 
-  const members  = family.members || [];
-  const head     = members.find(m => m.isHead) || members[0];
-  const students = members.filter(m => m.isStudent);
-  const others   = members.filter(m => !m.isStudent);
-  const filtered = activeTab === "students" ? students : activeTab === "others" ? others : members;
-  const pct      = calcCompletion(family, members);
+  const head     = memberList.find(m => m.isHead) || memberList[0];
+  const students = memberList.filter(m => m.isStudent);
+  const others   = memberList.filter(m => !m.isStudent);
+  const filtered = activeTab === "students" ? students : activeTab === "others" ? others : memberList;
+  const pct      = calcCompletion(familyData, memberList);
 
   const waInvite = m => {
-    const text = encodeURIComponent(`Hello ${m.name?.split(" ")[0] || ""}! 🙏\nJoin our Family App.\nLink: ${window.location.origin}/join?familyId=${familyId}\nPIN: ${family.familyPin}`);
-    return `https://wa.me/${(m.fullMobile || m.mobile || "").replace(/\D/g, "")}?text=${text}`;
+    const text = encodeURIComponent(`Hello ${m.name?.split(" ")[0] || ""}! 🙏\nJoin our Family App.\nLink: ${window.location.origin}/join?familyId=${user?.familyId}\nPIN: ${familyData.familyPin}`);
+    return `https://wa.me/${(m.mobile || "").replace(/\D/g, "")}?text=${text}`;
   };
 
   return (
     <div className="max-w-md mx-auto pb-24 min-h-screen" style={{ background: COLORS.bg }}>
 
-      {/* Hero */}
+      {/* Hero header */}
       <div id="tour-profile-section" className="px-4 pt-3 pb-5 relative overflow-hidden"
         style={{ background: "linear-gradient(135deg,#5A1020,#7B1C2E,#9B2335)" }}>
         <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: COLORS.gold }} />
@@ -195,7 +189,7 @@ export default function DashboardPage() {
           <h1 className="text-lg font-bold truncate flex-1 min-w-0" style={{ color: COLORS.goldLight }}>
             {toProperCase(head?.name) || "My Family"}
           </h1>
-          <button onClick={() => loadFamily(true)}
+          <button onClick={refresh}
             className="w-7 h-7 rounded-full flex items-center justify-center ml-2"
             style={{ background: "rgba(201,168,76,0.25)" }}>
             <RefreshCw size={13} color={COLORS.goldLight} />
@@ -204,18 +198,18 @@ export default function DashboardPage() {
 
         <div className="flex items-center gap-2 flex-wrap mb-2">
           <span className="text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0"
-            style={{ background: COLORS.gold, color: COLORS.primaryDark }}>{family.familyPin}</span>
+            style={{ background: COLORS.gold, color: COLORS.primaryDark }}>{familyData.familyPin}</span>
           <span style={{ color: "rgba(240,208,128,0.2)", fontSize: 12 }}>|</span>
           <InlineField icon={<MapPin size={10} color="rgba(240,208,128,0.55)" />}
-            value={family.city} placeholder="City" onSave={v => saveField("city", v)} uppercase />
+            value={familyData.city} placeholder="City" onSave={v => saveField("city", v)} uppercase />
           <span style={{ color: "rgba(240,208,128,0.2)", fontSize: 12 }}>|</span>
           <InlineField icon={<span style={{ fontSize: 10 }}>🏡</span>}
-            value={family.native} placeholder="Native" onSave={v => saveField("native", v)} uppercase />
+            value={familyData.native} placeholder="Native" onSave={v => saveField("native", v)} uppercase />
         </div>
 
         <div className="mb-3">
           <InlineField icon={<span style={{ fontSize: 10 }}>📬</span>}
-            value={family.address} placeholder="Add address" onSave={v => saveField("address", v)} />
+            value={familyData.address} placeholder="Add address" onSave={v => saveField("address", v)} />
         </div>
 
         <div>
@@ -234,7 +228,7 @@ export default function DashboardPage() {
       <div className="px-4 mt-4">
         <div className="rounded-xl p-1 flex" style={{ background: "rgba(90,16,32,0.08)" }}>
           {[
-            { key: "all",      label: `All (${members.length})` },
+            { key: "all",      label: `All (${memberList.length})` },
             { key: "students", label: `Students (${students.length})` },
             { key: "others",   label: `Others (${others.length})` },
           ].map(tab => (
@@ -265,9 +259,8 @@ export default function DashboardPage() {
                   memberId={member.id}
                   photoURL={member.photoURL}
                   honoraryOrgs={member.honoraryOrgs || []}
-                  onUpdate={async (id, url) => patchFamily(f => ({
-                    ...f, members: f.members.map(m => m.id === id ? { ...m, photoURL: url } : m),
-                  }))} />
+                  onUpdate={(id, url) => patchMember(id, { photoURL: url })}
+                />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -313,19 +306,17 @@ export default function DashboardPage() {
       </div>
 
       {/* Edit modal */}
-      <EditMemberModal open={!!editingMember} mode="edit" member={editingMember} familyId={familyId}
-        onClose={async (saved, updated) => {
+      <EditMemberModal open={!!editingMember} mode="edit" member={editingMember} familyId={user?.familyId}
+        onClose={(saved, updated) => {
           setEditingMember(null);
-          if (saved && updated)
-            await patchFamily(f => ({ ...f, members: f.members.map(m => m.id === updated.id ? { ...m, ...updated } : m) }));
+          if (saved && updated) patchMember(updated.id, updated);
         }} />
 
       {/* Add modal */}
-      <EditMemberModal open={showAdd} mode="add" familyId={familyId}
-        onClose={async (saved, newMember) => {
+      <EditMemberModal open={showAdd} mode="add" familyId={user?.familyId}
+        onClose={(saved, newMember) => {
           setShowAdd(false);
-          if (saved && newMember)
-            await patchFamily(f => ({ ...f, members: [...f.members, newMember] }));
+          if (saved && newMember) setMemberList(prev => [...prev, newMember]);
         }} />
 
       {/* FAB */}
@@ -335,12 +326,8 @@ export default function DashboardPage() {
         <Plus size={26} />
       </button>
 
-      {/* Dashboard tour */}
       {dashTour && (
-        <OnboardingTour
-          steps={DASHBOARD_TOUR_STEPS}
-          onFinish={handleDashTourFinish}
-        />
+        <OnboardingTour steps={DASHBOARD_TOUR_STEPS} onFinish={handleDashTourFinish} />
       )}
     </div>
   );

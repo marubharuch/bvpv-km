@@ -1,18 +1,18 @@
-// lib/text.js — Text formatting helpers.
+// lib/text.js — String utilities.
 
-/** "ramesh patel" → "Ramesh Patel" */
+/** "hello world" → "Hello World" */
 export function toProperCase(str) {
-  if (!str) return "";
-  return String(str).toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  return String(str || "")
+    .toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-/** Email → Firebase-safe key (no dots, no @). */
+/** Email → safe Firebase key (replace . with ,) */
 export function emailToKey(email) {
-  if (!email) return "";
-  return email.trim().toLowerCase().replace(/\./g, ",").replace(/@/g, "_");
+  return String(email || "").toLowerCase().replace(/\./g, ",");
 }
 
-/** "c_1234_ab56" style unique ID. */
+/** Generate a short random ID */
 export function genId() {
-  return `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  return Math.random().toString(36).slice(2, 10);
 }

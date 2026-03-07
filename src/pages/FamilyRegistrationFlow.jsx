@@ -21,56 +21,32 @@ import { COLORS }                from "../constants/app";
 
 // ── Bottom sheet: ask Google user for their mobile number ─────────────────
 function MobilePromptSheet({ user, onFound, onNotFound, onSkip }) {
-  const [rawInput, setRawInput] = useState("");
+  const [ccInput,  setCcInput]  = useState("+91");
+const [numInput, setNumInput] = useState("");
   const [busy,     setBusy]     = useState(false);
   const [err,      setErr]      = useState("");
 
-  // Parse whatever the user types:
-  // - 10 digits only  → assume +91
-  // - 12+ digits starting with country code digits (e.g. 919974...) → prepend +
-  // - starts with +   → use as-is
-  const parse = (raw) => {
-    const digits = raw.replace(/\D/g, "");
-    if (!digits) return { full: "", countryCode: "+91", localDigits: "" };
-    if (digits.length === 10) {
-      return { full: `+91${digits}`, countryCode: "+91", localDigits: digits };
-    }
-    // 11+ digits — treat first part as country code
-    const full = `+${digits}`;
-    const { countryCode, digits: localDigits } = splitMobile(full);
-    return { full, countryCode, localDigits };
-  };
 
-  const preview = () => {
-    const { full, countryCode, localDigits } = parse(rawInput);
-    if (!localDigits) return null;
-    return `${countryCode} ${localDigits}`;
-  };
+
+
 
   const handleCheck = async () => {
-    const { full, countryCode, localDigits } = parse(rawInput);
-    if (!localDigits || localDigits.length < 10) {
-      setErr("Enter a valid 10-digit mobile number.");
-      return;
+  const full = toFullMobile(ccInput, numInput);
+  if (numInput.length < 10) { setErr("Enter a valid mobile number."); return; }
+  setBusy(true); setErr("");
+  try {
+    const data = await getMobileIndex(full).catch(() => null);
+    const familyIds = Object.keys(data?.familyIds || {});
+    if (familyIds.length > 0) {
+      onFound({ full, countryCode: ccInput, familyId: familyIds[0], mxData: data });
+    } else {
+      onNotFound({ full, countryCode: ccInput, digits: numInput });
     }
-    setBusy(true);
-    setErr("");
-    try {
-      const data = await getMobileIndex(full).catch(() => null);
-      const familyIds = Object.keys(data?.familyIds || {});
-      if (familyIds.length > 0) {
-        onFound({ full, countryCode, familyId: familyIds[0], mxData: data });
-      } else {
-        onNotFound({ full, countryCode, digits: localDigits });
-      }
-    } catch {
-      setErr("Something went wrong. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
+  } catch { setErr("Something went wrong."); }
+  finally { setBusy(false); }
+};
 
-  const previewText = preview();
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center"
@@ -95,30 +71,13 @@ function MobilePromptSheet({ user, onFound, onNotFound, onSkip }) {
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <input
-            type="tel" inputMode="numeric"
-            placeholder="Mobile number"
-            value={rawInput}
-            onChange={e => { setRawInput(e.target.value.replace(/[^\d+]/g, "")); setErr(""); }}
-            className="w-full rounded-xl px-4 py-3 outline-none"
-            style={{ border: `2px solid ${err ? COLORS.error : COLORS.border}`, fontSize: 16, color: COLORS.textPrimary }}
-          />
-          {/* Live preview / hint */}
-          {previewText && !err && (
-            <p className="text-xs px-1" style={{ color: COLORS.textSecondary }}>
-              Will search as: <span className="font-bold" style={{ color: COLORS.primary }}>{previewText}</span>
-            </p>
-          )}
-          {!previewText && !err && (
-            <p className="text-xs px-1" style={{ color: COLORS.textMuted }}>
-              Enter 10 digits for India (+91), or include country code (e.g. 447911123456 for UK)
-            </p>
-          )}
-          {err && <p className="text-xs px-1 font-semibold" style={{ color: COLORS.error }}>{err}</p>}
-        </div>
+        <MobileInput
+  countryCode={ccInput}   onCountryCodeChange={setCcInput}
+  number={numInput}       onNumberChange={setNumInput}
+  error={err}
+/>
 
-        <button onClick={handleCheck} disabled={busy || !rawInput.trim()}
+        <button onClick={handleCheck} disabled={busy || numInput.length < 10}
           className="w-full py-3.5 rounded-2xl text-sm font-extrabold text-white disabled:opacity-50"
           style={{ background: COLORS.primary }}>
           {busy ? "Checking…" : "Next →"}
@@ -161,7 +120,7 @@ function MobileFamilyPinScreen({ familyId, mobile, user, onSuccess, onRegisterNe
         await rtdb.set(`members/${memberId}`, memberDoc({
           name:        user.displayName || user.email || "Member",
           mobile:      full,
-          countryCode: countryCode || "+91",
+          countryCode: countryCode,
           email:       user.email  || "",
           photoURL:    user.photoURL || "",
           isSelf:      true,

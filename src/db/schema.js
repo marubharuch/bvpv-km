@@ -1,14 +1,10 @@
-// db/schema.js
-// ─────────────────────────────────────────────────────────────────
+// db/schema.js — Data shape definitions. RTDB structure is unchanged.
+//
 // UNIFORM MOBILE RULE:
-//
-//   members/{id}/mobile     = "+919974021397"   fullMobile always
-//   users/{uid}/mobile      = "+919974021397"   fullMobile always
-//   mobileIndex KEY         = "+919974021397"   full number as key
+//   members/{id}/mobile     = "+919974021397"  fullMobile always
+//   users/{uid}/mobile      = "+919974021397"  fullMobile always
+//   mobileIndex KEY         = "+919974021397"  full number as key
 //   mobileIndex/countryCode = "+91"
-//
-// No 10-digit keys. No fullMobile/mobile split. One field. One format.
-// ─────────────────────────────────────────────────────────────────
 
 const ts = () => Date.now();
 
@@ -65,10 +61,7 @@ export function familyDoc(f = {}) {
   };
 }
 
-/**
- * mobileIndex/"+919974021397"
- * Key IS the full mobile — no fullMobile field needed inside.
- */
+/** mobileIndex/"+919974021397" */
 export function mobileIndexDoc(f = {}) {
   return {
     countryCode: f.countryCode || "+91",

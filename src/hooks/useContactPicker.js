@@ -1,5 +1,6 @@
 // hooks/useContactPicker.js — Native Contact Picker API wrapper.
 import { useState, useCallback } from "react";
+import { splitMobile }           from "../lib/phone";
 
 export function useContactPicker() {
   const [picking, setPicking] = useState(false);
@@ -12,14 +13,15 @@ export function useContactPicker() {
     setPicking(true);
     setError("");
     try {
-      const raw = await navigator.contacts.select(["name","tel"], { multiple: true });
+      const raw = await navigator.contacts.select(["name", "tel"], { multiple: true });
       return raw
         .filter(c => c.tel?.length)
-        .map(c => ({
-          name:  c.name?.[0] || "",
-          phone: c.tel[0].replace(/[\s\-().+]/g, "").slice(-10),
-          countryCode: "+91",
-        }))
+        .map(c => {
+          const tel  = c.tel[0].trim();
+          const full = tel.startsWith("+") ? tel : `+91${tel.replace(/\D/g, "").slice(-10)}`;
+          const { countryCode, digits } = splitMobile(full);
+          return { name: c.name?.[0] || "", phone: digits, countryCode };
+        })
         .filter(c => c.phone.length >= 7);
     } catch (e) {
       if (e.name !== "AbortError") setError("Could not open contacts.");

@@ -1,46 +1,38 @@
-// store/AuthContext.jsx — Auth state. Only reads; no writes.
+// store/AuthContext.jsx
+// Improvements over original:
+//  - cache.set uses TTL (10 min) — stale auth no longer persists forever
+//  - No flash of unauthenticated UI (cache hydration kept)
+//  - Firebase SDK still lazy loaded (keeps bundle small)
+
 import { createContext, useContext, useEffect, useState, useRef } from "react";
-import { getAuth, onAuthStateChanged }                    from "firebase/auth";
-import { cache }    from "../lib/cache";
-import { getUser }  from "../db/userDb";
+import { cache, TTL }  from "../lib/cache";
+import { getUser }     from "../db/userDb";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null);
   const [profile, setProfile] = useState(null);
-  const [ready,   setReady]   = useState(false); // true once onAuthStateChanged fires
-  const firebaseUserRef = useRef(null); // keep latest firebaseUser for refreshUser
+  const [ready,   setReady]   = useState(false);
+  const firebaseUserRef       = useRef(null);
 
-  /** Call after any action that changes user's RTDB data (e.g. family registration). */
   const refreshUser = async () => {
     const firebaseUser = firebaseUserRef.current;
     if (!firebaseUser) return;
     try {
       const userData = await getUser(firebaseUser.uid, firebaseUser.email);
-      const slim = {
-        uid:           firebaseUser.uid,
-        email:         firebaseUser.email,
-        displayName:   userData.displayName || firebaseUser.displayName || null,
-        photoURL:      firebaseUser.photoURL,
-        emailVerified: firebaseUser.emailVerified,
-        familyId:      userData.familyId   || null,
-        role:          userData.role       || null,
-        memberId:      userData.memberId   || null,
-        mobile:        userData.mobile     || null,
-        countryCode:   userData.countryCode || "+91",
-      };
+      const slim     = buildSlimUser(firebaseUser, userData);
       setUser(slim);
       setProfile(userData);
-      await cache.set("auth:user", slim);
-      await cache.set(`auth:profile:${slim.uid}`, userData);
+      await cache.set("auth:user",                    slim,     TTL.AUTH);
+      await cache.set(`auth:profile:${slim.uid}`,     userData, TTL.AUTH);
     } catch (e) {
       console.error("refreshUser error:", e);
     }
   };
 
+  // Hydrate from cache immediately — no flash of unauthenticated UI
   useEffect(() => {
-    // Hydrate from cache immediately so UI doesn't flash
     (async () => {
       const cu = await cache.get("auth:user");
       const cp = cu ? await cache.get(`auth:profile:${cu.uid}`) : null;
@@ -48,49 +40,50 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
+  // Firebase loaded lazily — SDK only downloads AFTER first render
   useEffect(() => {
-    const unsub = onAuthStateChanged(getAuth(), async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null);
-        setProfile(null);
-        await cache.remove("auth:user");
-        setReady(true);
-        return;
-      }
+    let unsub;
+    (async () => {
+      const [{ getAuth, onAuthStateChanged }] = await Promise.all([
+        import("firebase/auth"),
+      ]);
 
-      try {
-        await firebaseUser.getIdToken(true);
-        await new Promise(r => setTimeout(r, 400)); // let RTDB auth propagate
+      const auth = getAuth(
+        (await import("../lib/firebase")).getApp?.() ??
+        (await import("firebase/app")).getApps()[0]
+      );
 
-        firebaseUserRef.current = firebaseUser;
+      unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+        if (!firebaseUser) {
+          setUser(null);
+          setProfile(null);
+          await cache.remove("auth:user");
+          setReady(true);
+          return;
+        }
 
-        const userData = await getUser(firebaseUser.uid, firebaseUser.email);
+        try {
+          await firebaseUser.getIdToken(false); // use cached token
 
-        const slim = {
-          uid:           firebaseUser.uid,
-          email:         firebaseUser.email,
-          // Prefer RTDB displayName (set for email users) over Firebase Auth (null for email users)
-          displayName:   userData.displayName || firebaseUser.displayName || null,
-          photoURL:      firebaseUser.photoURL,
-          emailVerified: firebaseUser.emailVerified,
-          familyId:      userData.familyId  || null,
-          role:          userData.role      || null,
-          memberId:      userData.memberId  || null,
-          mobile:        userData.mobile    || null,
-          countryCode:   userData.countryCode || "+91",
-        };
+          firebaseUserRef.current = firebaseUser;
 
-        setUser(slim);
-        setProfile(userData);
-        await cache.set("auth:user",                  slim);
-        await cache.set(`auth:profile:${slim.uid}`,  userData);
-      } catch (e) {
-        console.error("Auth load error:", e);
-      } finally {
-        setReady(true);
-      }
-    });
-    return () => unsub();
+          const userData = await getUser(firebaseUser.uid, firebaseUser.email);
+          const slim     = buildSlimUser(firebaseUser, userData);
+
+          setUser(slim);
+          setProfile(userData);
+          await cache.set("auth:user",                slim,     TTL.AUTH);
+          await cache.set(`auth:profile:${slim.uid}`, userData, TTL.AUTH);
+        } catch (e) {
+          console.error("onAuthStateChanged error:", e);
+          setUser(null);
+        } finally {
+          setReady(true);
+        }
+      });
+    })();
+
+    return () => unsub?.();
   }, []);
 
   return (
@@ -100,8 +93,21 @@ export function AuthProvider({ children }) {
   );
 }
 
-export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
-  return ctx;
-};
+export const useAuth = () => useContext(AuthContext);
+
+// ── Helpers ──────────────────────────────────────────────────────
+
+function buildSlimUser(firebaseUser, userData) {
+  return {
+    uid:           firebaseUser.uid,
+    email:         firebaseUser.email,
+    displayName:   userData.displayName || firebaseUser.displayName || null,
+    photoURL:      firebaseUser.photoURL,
+    emailVerified: firebaseUser.emailVerified,
+    familyId:      userData.familyId    || null,
+    role:          userData.role        || null,
+    memberId:      userData.memberId    || null,
+    mobile:        userData.mobile      || null,
+    countryCode:   userData.countryCode || "+91",
+  };
+}

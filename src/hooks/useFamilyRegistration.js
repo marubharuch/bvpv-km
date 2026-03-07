@@ -1,16 +1,16 @@
-// hooks/useFamilyRegistration.js
+// hooks/useFamilyRegistration.js — Multi-step family registration state.
+// Draft persisted to localStorage so refresh doesn't lose progress.
+
 import { useState, useEffect, useCallback } from "react";
 import { genId } from "../lib/text";
 
-const STEPS = { CITY: "city", CONTACTS: "contacts", REORDER: "reorder" };
-const init  = { step: STEPS.CITY, city: "", contacts: [] };
+export const STEPS = { CITY: "city", CONTACTS: "contacts", REORDER: "reorder" };
 
+const init    = { step: STEPS.CITY, city: "", contacts: [] };
 const key     = uid => `family_reg_draft:${uid || "anon"}`;
 const persist = (uid, s) => { try { localStorage.setItem(key(uid), JSON.stringify(s)); } catch {} };
 const load    = uid     => { try { return JSON.parse(localStorage.getItem(key(uid))) || null; } catch { return null; } };
 const clear   = uid     => { try { localStorage.removeItem(key(uid)); } catch {} };
-
-export { STEPS };
 
 export function useFamilyRegistration(uid) {
   const [state, setState] = useState(() => load(uid) || init);
@@ -20,9 +20,9 @@ export function useFamilyRegistration(uid) {
   const patch = useCallback(p => setState(s => ({ ...s, ...p })), []);
 
   const setCity     = useCallback(city    => patch({ city, step: STEPS.CONTACTS }), [patch]);
-  const goToReorder = useCallback(()       => patch({ step: STEPS.REORDER }),       [patch]);
+  const goToReorder = useCallback(()      => patch({ step: STEPS.REORDER }),        [patch]);
   const reorder     = useCallback(contacts => patch({ contacts }),                  [patch]);
-  const goBack      = useCallback(()       => setState(s => ({
+  const goBack      = useCallback(() => setState(s => ({
     ...s, step: s.step === STEPS.CONTACTS ? STEPS.CITY : STEPS.CONTACTS,
   })), []);
 
@@ -33,8 +33,8 @@ export function useFamilyRegistration(uid) {
       .filter(c => !existing.has(c.phone || c.mobile))
       .map(c => ({
         id:          genId(),
-        name:        (c.name   || "").trim(),
-        phone:       (c.phone  || c.mobile || "").trim(),
+        name:        (c.name  || "").trim(),
+        phone:       (c.phone || c.mobile || "").trim(),
         countryCode: c.countryCode || "+91",
         isSelf:      c.isSelf || false,
       }));

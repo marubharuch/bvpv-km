@@ -1,8 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
+import qr from "../assets/qr.png"
 
 const APP_URL = "https://bvpv-km.web.app/";
-const QR_URL  = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(APP_URL)}&color=4a0f1a&bgcolor=fff8ee&qzone=1`;
 
 // ── Slide content ──────────────────────────────────────────────────
 
@@ -56,15 +56,16 @@ function SlideWelcome({ onNext }) {
   );
 }
 
-function SlideGoals({ onNext }) {
-  const goals = [
-    { icon: "🏛️", text: "સરકારી સહાયો વિદ્યાર્થીઓ સુધી પહોંચાડવી" },
-    { icon: "🎯", text: "કારકિર્દી વિષયક માર્ગદર્શન આપવું" },
-    { icon: "💰", text: "જરૂરિયાતમંદ વિદ્યાર્થીઓને આર્થિક સહાય" },
-    { icon: "📍", text: "દૂર ભણતા વિદ્યાર્થીઓ ને નજીકના કોન્ટેક્ટ" },
-    { icon: "🤝", text: "સમાન ગ્રૂપ ના વિદ્યાર્થીઓ ને જોડવા" },
-  ];
+// Goals array defined outside component — no re-creation on every render
+const GOALS = [
+  { icon: "🏛️", text: "સરકારી સહાયો વિદ્યાર્થીઓ સુધી પહોંચાડવી" },
+  { icon: "🎯", text: "કારકિર્દી વિષયક માર્ગદર્શન આપવું" },
+  { icon: "💰", text: "જરૂરિયાતમંદ વિદ્યાર્થીઓને આર્થિક સહાય" },
+  { icon: "📍", text: "દૂર ભણતા વિદ્યાર્થીઓ ને નજીકના કોન્ટેક્ટ" },
+  { icon: "🤝", text: "સમાન ગ્રૂપ ના વિદ્યાર્થીઓ ને જોડવા" },
+];
 
+function SlideGoals({ onNext }) {
   return (
     <div className="flex flex-col justify-between h-full px-6 py-10"
       style={{ background: "linear-gradient(160deg,#0a2e1a 0%,#1a5c35 100%)" }}>
@@ -79,7 +80,7 @@ function SlideGoals({ onNext }) {
         </h2>
 
         <div className="space-y-2">
-          {goals.map((g, i) => (
+          {GOALS.map((g, i) => (
             <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl"
               style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <span className="text-xl flex-shrink-0">{g.icon}</span>
@@ -97,6 +98,12 @@ function SlideGoals({ onNext }) {
     </div>
   );
 }
+
+// Awards array defined outside component — no re-creation on every render
+const AWARDS = [
+  { icon: "🥇", label: "Upload Award", desc: "સૌથી વધુ community contacts અપલોડ કરો" },
+  { icon: "🌟", label: "Invite Award",  desc: "સૌથી વધુ લોકોને register કરાવો" },
+];
 
 function SlideCompetition({ onNext }) {
   return (
@@ -118,10 +125,7 @@ function SlideCompetition({ onNext }) {
         </p>
 
         <div className="space-y-2 mb-4">
-          {[
-            { icon: "🥇", label: "Upload Award", desc: "સૌથી વધુ community contacts અપલોડ કરો" },
-            { icon: "🌟", label: "Invite Award",  desc: "સૌથી વધુ લોકોને register કરાવો" },
-          ].map((p, i) => (
+          {AWARDS.map((p, i) => (
             <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
               style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(251,191,36,0.25)" }}>
               <span className="text-2xl flex-shrink-0">{p.icon}</span>
@@ -171,8 +175,16 @@ function SlideQR() {
         <div className="flex justify-center mb-5">
           <div className="rounded-2xl p-4"
             style={{ background: "#fff8ee", border: "2px solid rgba(201,168,76,0.4)" }}>
-            <img src={QR_URL} alt="QR Code" width={160} height={160}
-              style={{ borderRadius: 8, display: "block" }} />
+            {/* Local asset — no external network request, faster LCP */}
+            <img
+              src={qr}
+              alt="QR Code"
+              width={160}
+              height={160}
+              loading="eager"
+              decoding="async"
+              style={{ borderRadius: 8, display: "block" }}
+            />
           </div>
         </div>
 
@@ -190,14 +202,7 @@ function SlideQR() {
         </div>
       </div>
 
-      {/* Two action buttons at bottom */}
       <div className="flex flex-col gap-3 mt-4">
-      {/*  <Link to="/connectors"
-          className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl text-sm font-bold"
-          style={{ background: "linear-gradient(135deg,#b45309,#d97706)", color: "#fef3c7", boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}>
-          🏆 સ્પર્ધામાં ભાગ લો →
-        </Link>*/}
-        
         <Link to="/registration"
           className="flex items-center justify-center gap-2 w-full py-4 rounded-2xl text-base font-bold"
           style={{ background: "linear-gradient(135deg,#c9a84c,#f0d080)", color: "#4a0f1a", boxShadow: "0 6px 24px rgba(0,0,0,0.3)" }}>
@@ -225,6 +230,8 @@ function Dots({ total, current }) {
   );
 }
 
+const TOTAL_SLIDES = 4;
+
 // ── Main ───────────────────────────────────────────────────────────
 export default function Home() {
   const [current, setCurrent] = useState(0);
@@ -232,44 +239,38 @@ export default function Home() {
   const [visible, setVisible]  = useState(true);
   const touchStartY = useRef(null);
 
-  // ✅ FIX: slideComponents and total must match
-  const slideComponents = [
-    <SlideWelcome     onNext={() => goTo(1, 1)} />,
-    <SlideGoals       onNext={() => goTo(2, 1)} />,
-    <SlideCompetition onNext={() => goTo(3, 1)} />,
-    <SlideQR />,
-  ];
-
-  const total = slideComponents.length; // ✅ 4, not SLIDES.length (which was 6)
-
-  const goTo = (index, dir = 1) => {
-    if (index < 0 || index >= total) return;
+  // ✅ useCallback — stable references, no re-creation on every render
+  const goTo = useCallback((index, dir = 1) => {
+    if (index < 0 || index >= TOTAL_SLIDES) return;
     setAnimDir(dir);
     setVisible(false);
     setTimeout(() => {
       setCurrent(index);
       setVisible(true);
     }, 220);
-  };
+  }, []); // no deps — TOTAL_SLIDES is a constant
 
-  const goNext = () => goTo(current + 1, 1);
-  const goPrev = () => goTo(current - 1, -1);
+  const goNext = useCallback(() => goTo(current + 1,  1), [current, goTo]);
+  const goPrev = useCallback(() => goTo(current - 1, -1), [current, goTo]);
 
-  const onTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
-  const onTouchEnd   = (e) => {
-    if (touchStartY.current === null) return;
-    const delta = touchStartY.current - e.changedTouches[0].clientY;
-    if (Math.abs(delta) > 40) delta > 0 ? goNext() : goPrev();
-    touchStartY.current = null;
-  };
-
-  // ✅ FIX: pass goTo correctly — slides need access to goTo which is defined after them
-  const slides = [
+  // ✅ useMemo — slides array not rebuilt on every render
+  const slides = useMemo(() => [
     <SlideWelcome     key={0} onNext={goNext} />,
     <SlideGoals       key={1} onNext={goNext} />,
     <SlideCompetition key={2} onNext={goNext} />,
     <SlideQR          key={3} />,
-  ];
+  ], [goNext]); // only rebuilds when goNext changes (i.e. when current changes)
+
+  const onTouchStart = useCallback((e) => {
+    touchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  const onTouchEnd = useCallback((e) => {
+    if (touchStartY.current === null) return;
+    const delta = touchStartY.current - e.changedTouches[0].clientY;
+    if (Math.abs(delta) > 40) delta > 0 ? goNext() : goPrev();
+    touchStartY.current = null;
+  }, [goNext, goPrev]);
 
   return (
     <div
@@ -280,10 +281,10 @@ export default function Home() {
     >
       {/* Slide area */}
       <div style={{
-        flex:      1,
-        overflow:  "hidden",
-        opacity:   visible ? 1 : 0,
-        transform: visible ? "translateY(0)" : `translateY(${animDir * 18}px)`,
+        flex:       1,
+        overflow:   "hidden",
+        opacity:    visible ? 1 : 0,
+        transform:  visible ? "translateY(0)" : `translateY(${animDir * 18}px)`,
         transition: "opacity 0.22s ease, transform 0.22s ease",
       }}>
         {slides[current]}
@@ -299,9 +300,9 @@ export default function Home() {
           ↑
         </button>
 
-        <Dots total={total} current={current} />
+        <Dots total={TOTAL_SLIDES} current={current} />
 
-        <button onClick={goNext} disabled={current === total - 1}
+        <button onClick={goNext} disabled={current === TOTAL_SLIDES - 1}
           className="w-10 h-10 rounded-full flex items-center justify-center text-lg disabled:opacity-20 transition-opacity"
           style={{ background: "rgba(201,168,76,0.1)", color: "#c9a84c" }}>
           ↓

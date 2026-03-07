@@ -1,20 +1,17 @@
-// lib/phone.js
-// ─────────────────────────────────────────────────────────────────
+// lib/phone.js — Single source of truth for all phone utilities.
+// normalizePhone.js is REMOVED — everything lives here.
+//
 // UNIFORM RULE — entire app:
-//
-//   members/{id}/mobile       = "+919974021397"
-//   users/{uid}/mobile        = "+919974021397"
-//   mobileIndex KEY           = "+919974021397"  ← full number as key
-//   mobileIndex/countryCode   = "+91"
-//
-// toMobileKey() is REMOVED — no more 10-digit anywhere.
-// ─────────────────────────────────────────────────────────────────
+//   members/{id}/mobile     = "+919974021397"  fullMobile always
+//   users/{uid}/mobile      = "+919974021397"  fullMobile always
+//   mobileIndex KEY         = "+919974021397"  full number as key
+//   mobileIndex/countryCode = "+91"
 
 import { COUNTRY_CODES } from "../constants/app";
 
 /**
  * Build fullMobile from parts. Idempotent.
- * toFullMobile("+91", "9974021397")   → "+919974021397"
+ * toFullMobile("+91", "9974021397")    → "+919974021397"
  * toFullMobile("+91", "+919974021397") → "+919974021397"
  */
 export function toFullMobile(countryCode, digits) {
@@ -28,12 +25,10 @@ export function toFullMobile(countryCode, digits) {
 
 /**
  * Encode fullMobile for use as a Firebase RTDB key.
- * Firebase keys cannot contain "." but "+" and digits are fine.
- * "+919974021397" → "+919974021397"  (no change needed)
+ * "+919974021397" → "+919974021397" (no change needed — + and digits are valid)
  */
 export function toMobileKey(fullMobile) {
   if (!fullMobile) return "";
-  // Ensure it starts with +
   const s = String(fullMobile).trim();
   return s.startsWith("+") ? s : `+91${s.replace(/\D/g, "").slice(-10)}`;
 }
@@ -57,7 +52,31 @@ export function splitMobile(fullMobile) {
   return { countryCode: "+91", digits: s.replace(/\D/g, "").slice(-10) };
 }
 
+/**
+ * Normalize any raw phone input to clean 10-digit string.
+ * Handles +91, 91, 0091 prefixes.
+ * normalizeMobile("919974021397") → "9974021397"
+ */
+export function normalizeMobile(mobile) {
+  if (!mobile) return "";
+  return String(mobile).trim().replace(/\D/g, "").slice(-10);
+}
+
 /** Validate Indian mobile digits (10 digits, starts 6-9) */
 export function isValidIndianMobile(digits) {
   return /^[6-9]\d{9}$/.test(String(digits || ""));
+}
+
+/**
+ * Parse raw phone string from contact picker.
+ * "+919974021397" → { countryCode: "+91", digits: "9974021397" }
+ * "9974021397"    → { countryCode: "+91", digits: "9974021397" }
+ */
+export function parseRawPhone(raw) {
+  if (!raw) return { countryCode: "+91", digits: "" };
+  const cleaned = raw.replace(/[\s\-().]/g, "");
+  const full    = cleaned.startsWith("+")
+    ? cleaned
+    : `+91${cleaned.replace(/\D/g, "").slice(-10)}`;
+  return splitMobile(full);
 }
