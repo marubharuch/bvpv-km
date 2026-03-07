@@ -195,31 +195,55 @@ export default function ConnectorsPage() {
 
   // ── Invite list — targeted reads only ────────────────────────
   async function loadInviteList() {
-    setInviteLoading(true);
-    try {
-      const now  = Date.now();
-      const snap = await get(ref(db, "connectors"));
-      if (!snap.exists()) { setInviteAllList([]); setInviteLoading(false); return; }
+  setInviteLoading(true);
+  try {
+    const now = Date.now();
 
-      const list = [];
-      snap.forEach(child => {
-        const d = child.val();
-        if (!d.joinedUserId && (!d.invite || d.invite.expiresAt < now))
-          list.push({ fullKey: child.key, ...d });
-      });
+    const [connectorsSnap, mobileIndexSnap] = await Promise.all([
+      get(ref(db, "connectors")),
+      get(ref(db, "mobileIndex")),
+    ]);
+     console.log("connectors exists:", connectorsSnap.exists());
+    console.log("connectors val:", connectorsSnap.val());
+    console.log("mobileIndex val:", mobileIndexSnap.val());
 
-      // Sort: user's own city first, then others
-      const userCity = user?.city || "";
-      list.sort((a, b) => {
-        if (a.city === userCity && b.city !== userCity) return -1;
-        if (a.city !== userCity && b.city === userCity) return  1;
-        return (a.city || "").localeCompare(b.city || "");
-      });
+    if (!connectorsSnap.exists()) { 
+      setInviteAllList([]); 
+      setInviteLoading(false); 
+      return; 
+    }
 
-      setInviteAllList(list);
-    } catch (e) { console.error(e); }
-    setInviteLoading(false);
-  }
+    const mobileIndex = mobileIndexSnap.exists() ? mobileIndexSnap.val() : {};
+
+    const list = [];
+    connectorsSnap.forEach(child => {
+      const d = child.val();
+      const fullKey = child.key; // e.g. "+918000559551"
+
+      // Check mobileIndex — skip if already a registered user
+      const indexEntry = mobileIndex[fullKey];
+      const isRegistered = indexEntry?.isUser === true;
+      if (isRegistered) return;
+
+      // Skip if active invite exists
+      const hasActiveInvite = d.invite && d.invite.expiresAt > now;
+      if (hasActiveInvite) return;
+
+      list.push({ fullKey, ...d });
+    });
+
+    // Sort: user's own city first
+    const userCity = user?.city || "";
+    list.sort((a, b) => {
+      if (a.city === userCity && b.city !== userCity) return -1;
+      if (a.city !== userCity && b.city === userCity) return 1;
+      return (a.city || "").localeCompare(b.city || "");
+    });
+
+    setInviteAllList(list);
+  } catch (e) { console.error(e); }
+  setInviteLoading(false);
+}
 
   useEffect(() => { if (tab === "invite") loadInviteList(); }, [tab]);
 
@@ -236,7 +260,7 @@ export default function ConnectorsPage() {
     const message    = encodeURIComponent(
 `નમસ્તે ${contact.name}! 🙏
 
-આપણી Community Directory App માં જોડાઓ.
+આપણી કેળવણી મંડળ App માં જોડાઓ.
 
 ${inviteLink}
 
@@ -439,7 +463,7 @@ ${inviteLink}
                 <div className="text-5xl mb-3">👥</div>
                 <p className="text-lg font-extrabold text-gray-700 mb-2">Contact Picker ખોલો</p>
                 <p className="text-sm text-gray-500 leading-relaxed">
-                  Phone book માંથી community contacts select કરો,<br />
+                  Phone book માંથી  contacts select કરો,<br />
                   નામ edit કરો, city add કરો અને submit કરો.
                 </p>
               </div>

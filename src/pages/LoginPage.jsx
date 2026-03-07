@@ -88,7 +88,7 @@ export default function LoginPage() {
         className="w-full py-3.5 rounded-xl text-sm font-bold border-2 flex items-center justify-center gap-2 disabled:opacity-60"
         style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: "#fff" }}>
         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="G" />
-        Continue with Google
+        Continue with Google (રજીસ્ટ્રેશન જરૂર નથી)
       </button>
 
       <div className="flex items-center gap-3">
@@ -125,7 +125,7 @@ export default function LoginPage() {
             style={inputStyle} className={inputCls} />
           <div>
             <p className="text-xs font-semibold mb-1.5" style={{ color: COLORS.primary }}>
-              Mobile (optional)
+              Mobile (Compulsory)
             </p>
             <MobileInput countryCode={cc} onCountryCodeChange={setCc}
               number={mob} onNumberChange={setMob} />
