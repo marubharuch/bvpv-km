@@ -40,7 +40,7 @@ function InlineField({ icon, value, placeholder, onSave, uppercase = false }) {
       </button>
 
       {editing && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ background: "rgba(0,0,0,0.45)" }}
+        <div className="fixed inset-0 z-[60] flex flex-col justify-end" style={{ background: "rgba(0,0,0,0.45)" }}
           onClick={() => setEditing(false)}>
           <div className="rounded-t-2xl p-5 w-full" style={{ background: COLORS.bg, paddingBottom: "96px" }}
             onClick={e => e.stopPropagation()}>

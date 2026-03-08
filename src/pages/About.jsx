@@ -145,7 +145,7 @@ function MemberCard({ entry, showOrgName = false }) {
   // ✅ useState inside component — each card has its own independent zoom state
   const [isZoomed, setIsZoomed] = useState(false);
 
-  const { memberName, post, mobile, photoURL, orgName } = entry;
+  const { memberName,city, post, mobile, photoURL, orgName } = entry;
 
   const initials = (memberName || "?")
     .split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -273,7 +273,7 @@ function MemberCard({ entry, showOrgName = false }) {
           {memberName || "—"}
         </p>
         <p className="text-xs font-semibold mt-0.5" style={{ color: "#7B1C2E" }}>
-          {post}
+          {city}-{post}
         </p>
         {showOrgName && orgName && (
           <p className="text-xs mt-0.5 truncate font-medium" style={{ color: "#C9A84C" }}>

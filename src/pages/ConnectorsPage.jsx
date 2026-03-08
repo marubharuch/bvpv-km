@@ -601,7 +601,7 @@ ${inviteLink}
 
       {/* CITY POPUP */}
       {cityTarget !== null && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center"
+        <div className="fixed inset-0 z-[60] flex items-end justify-center"
           style={{ background: "rgba(0,0,0,0.55)" }}
           onClick={() => setCityTarget(null)}>
           <div className="bg-white rounded-t-3xl w-full max-w-lg flex flex-col px-4 pt-5"
@@ -632,7 +632,7 @@ ${inviteLink}
 
       {/* RULES MODAL */}
       {showRules && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center"
           style={{ background: "rgba(0,0,0,0.75)" }}
           onClick={() => setShowRules(false)}>
           <div className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl flex flex-col"

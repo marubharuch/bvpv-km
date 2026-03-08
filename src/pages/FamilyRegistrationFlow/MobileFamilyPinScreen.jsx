@@ -63,7 +63,7 @@ export default function MobileFamilyPinScreen({ familyId, mobile, user, onSucces
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center"
+    <div className="fixed inset-0 z-[60] flex items-end justify-center"
       style={{ background: "rgba(0,0,0,0.45)" }}>
       <div className="w-full max-w-md rounded-t-3xl p-6 space-y-5"
         style={{ background: COLORS.bg }}>

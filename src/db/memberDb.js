@@ -105,7 +105,7 @@ export async function updateMemberPhoto(memberId, photoURL, honoraryOrgs = []) {
   const honoraryWrites = {};
   (honoraryOrgs || []).forEach(entry => {
     if (!entry.orgId || !entry.post) return;
-    honoraryWrites[`honoraryIndex/${entry.orgId}/${memberId}/photoURL`]  = `${photoURL}?v=${ts}`;
+    honoraryWrites[`honoraryIndex/${entry.orgId}/${memberId}/photoURL`]  = `${photoURL}`;
     honoraryWrites[`honoraryIndex/${entry.orgId}/${memberId}/updatedAt`] = ts;
   });
   if (Object.keys(honoraryWrites).length) await rtdb.batch(honoraryWrites);
