@@ -24,6 +24,8 @@ const RegistrationSuccess    = lazy(() => import("./pages/RegistrationSuccess"))
 const DashboardPage          = lazy(() => import("./pages/DashboardPage/index"));          // folder
 const ProfilePage            = lazy(() => import("./pages/ProfilePage"));
 const StudentsPage           = lazy(() => import("./pages/StudentsPage"));
+const VanshTreeView          = lazy(() => import("./pages/VanshTreeView"));
+const VanshVriksha            = lazy(() => import("./pages/VanshVriksha"));
 
 function AppRoutes() {
   const { ready } = useAuth();
@@ -43,6 +45,7 @@ function AppRoutes() {
           <Route path="/join"          element={<JoinFamilyPage />} />
           <Route path="/leaderboard"   element={<LeaderboardPage />} />
           <Route path="/register-list" element={<RegisterList />} />
+        
 
           {/* Auth-required */}
           <Route path="/onboarding"           element={<PrivateRoute><OnboardingPage /></PrivateRoute>} />
@@ -53,6 +56,8 @@ function AppRoutes() {
           <Route path="/students"             element={<PrivateRoute><StudentsPage /></PrivateRoute>} />
         <Route path="/admin-delete" element={<AdminDeleteUser />} />
         </Route>
+          <Route path="/vansh" element={<VanshVriksha />} />
+          <Route path="/tree" element={<VanshTreeView />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

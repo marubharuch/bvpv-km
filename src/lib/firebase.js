@@ -1,6 +1,7 @@
 // lib/firebase.js — Firebase initialisation. Import db and auth from here.
 import { initializeApp } from "firebase/app";
 import { getDatabase }   from "firebase/database";
+import { getFirestore }  from "firebase/firestore";
 import { getAuth }       from "firebase/auth";
 
 const firebaseConfig = {
@@ -13,6 +14,7 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
-export const db   = getDatabase(app);
-export const auth = getAuth(app);
+export const app      = initializeApp(firebaseConfig);  // ← added export
+export const db       = getDatabase(app);
+export const auth     = getAuth(app);
+export const firestore = getFirestore(app);             // ← new
