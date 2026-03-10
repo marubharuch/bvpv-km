@@ -67,8 +67,9 @@ function Toast({ msg }) {
 }
 
 export default function FamilyTree({ uid }) {
-  const { nodes, treeName, loading, saving, initDone,
-    initTree, addSpouse, addSibling, addChild, addAncestor, reset,
+  const { nodes, treeName, rowOrder, loading, saving, initDone,
+    initTree, addSpouse, addSibling, addChild, addAncestor,
+    saveRowOrder, resetRowOrder, reset,
   } = useFamilyTree(uid);
 
   const [view,    setView]    = useState('edit');
@@ -156,7 +157,10 @@ export default function FamilyTree({ uid }) {
           focusId={focusId} />
       )}
       {initDone && view==='table' && (
-        <TableView nodes={nodes} onEditPerson={handleEditPerson} />
+        <TableView nodes={nodes} onEditPerson={handleEditPerson}
+          savedRowOrder={rowOrder}
+          onSaveRowOrder={saveRowOrder}
+          onResetRowOrder={resetRowOrder} />
       )}
 
       <Toast msg={toast} />

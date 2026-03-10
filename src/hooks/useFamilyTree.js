@@ -1,6 +1,4 @@
 // hooks/useFamilyTree.js
-// Persistence: localStorage (instant) + Firestore (debounced 1.5s)
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore } from '../lib/firebase';
@@ -17,7 +15,6 @@ const treeRef = uid => doc(firestore, 'vansh_trees', uid);
 const fsLoad  = uid => getDoc(treeRef(uid)).then(s => s.exists() ? s.data() : null);
 const fsSave  = (uid, nodes, meta) => setDoc(treeRef(uid), { nodes, meta, updatedAt: serverTimestamp() });
 
-// ID counter — lives inside the hook via ref so it's per-instance
 function makeIdGen(startFrom = 1) {
   let n = startFrom;
   return () => n++;
@@ -26,16 +23,26 @@ function makeIdGen(startFrom = 1) {
 export function useFamilyTree(uid) {
   const [nodes,    setNodes]    = useState([]);
   const [treeName, setTreeName] = useState('Family Tree');
+  const [rowOrder, setRowOrder] = useState(null);
   const [loading,  setLoading]  = useState(true);
   const [saving,   setSaving]   = useState(false);
   const [initDone, setInitDone] = useState(false);
 
-  const nextId    = useRef(makeIdGen(1));
-  const saveTimer = useRef(null);
+  const nextId      = useRef(makeIdGen(1));
+  const saveTimer   = useRef(null);
+  // Keep latest values in refs so callbacks never go stale
+  const treeNameRef = useRef('Family Tree');
+  const rowOrderRef = useRef(null);
+  const nodesRef    = useRef([]);
 
-  // ── persist helper ────────────────────────────────────────────────────────
-  const persist = useCallback((newNodes, name) => {
-    const meta = { treeName: name };
+  // Keep refs in sync
+  useEffect(() => { treeNameRef.current = treeName; }, [treeName]);
+  useEffect(() => { rowOrderRef.current = rowOrder; }, [rowOrder]);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+
+  // ── persist ───────────────────────────────────────────────────────────────
+  const persist = useCallback((newNodes, name, order) => {
+    const meta = { treeName: name, rowOrder: order ?? null };
     lsSave(newNodes, meta);
     if (!uid) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -51,17 +58,16 @@ export function useFamilyTree(uid) {
   useEffect(() => {
     const ls   = lsLoad();
     const meta = lsMeta();
-
     if (ls && ls.length > 0) {
       const maxId = Math.max(...ls.map(n => n.id), 0);
       nextId.current = makeIdGen(maxId + 1);
       setNodes(ls);
       if (meta.treeName) setTreeName(meta.treeName);
+      if (meta.rowOrder) setRowOrder(meta.rowOrder);
       setInitDone(true);
       setLoading(false);
       return;
     }
-
     if (uid) {
       fsLoad(uid)
         .then(data => {
@@ -71,7 +77,8 @@ export function useFamilyTree(uid) {
             setNodes(data.nodes);
             const name = data.meta?.treeName || 'Family Tree';
             setTreeName(name);
-            lsSave(data.nodes, { treeName: name });
+            if (data.meta?.rowOrder) setRowOrder(data.meta.rowOrder);
+            lsSave(data.nodes, { treeName: name, rowOrder: data.meta?.rowOrder || null });
             setInitDone(true);
           }
         })
@@ -83,49 +90,27 @@ export function useFamilyTree(uid) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── initTree ──────────────────────────────────────────────────────────────
-  const initTree = useCallback((rawInput) => {
-    const names = rawInput.trim().split(/\s+/).filter(Boolean);
-    if (!names.length) return;
-
-    // Reset ID counter from 1 for a fresh tree
-    nextId.current = makeIdGen(1);
-    const getId = () => nextId.current();
-
-    const newNodes = names.map((name, i) => ({
-      id:          getId(),
-      name,
-      gen:         i + 1,          // gen1 = youngest, gen N = oldest
-      ancestorId:  null,
-      spouseOf:    null,
-      descendants: [],
-      siblings:    [],
-      isYoungest:  i === 0,
-    }));
-
-    // Link: each node's ancestorId → next node (one gen older)
-    // older node's descendants[] ← younger node id
-    for (let i = 0; i < newNodes.length - 1; i++) {
-      newNodes[i].ancestorId = newNodes[i + 1].id;
-      newNodes[i + 1].descendants.push(newNodes[i].id);
-    }
-
-    const name = names[0] + "'s Family Tree";
-    lsClear();
-    setTreeName(name);
-    setNodes(newNodes);
-    setInitDone(true);
-    persist(newNodes, name);
-  }, [persist]);
-
-  // ── mutate helper ─────────────────────────────────────────────────────────
+  // ── mutate — uses refs, never stale ──────────────────────────────────────
   const mutate = useCallback((updater) => {
     setNodes(prev => {
       const next = updater(prev, nextId.current);
-      persist(next, treeName);
+      persist(next, treeNameRef.current, rowOrderRef.current);
       return next;
     });
-  }, [persist, treeName]);
+  }, [persist]);
+
+  // ── saveRowOrder ──────────────────────────────────────────────────────────
+  const saveRowOrder = useCallback((order) => {
+    setRowOrder(order);
+    rowOrderRef.current = order;
+    persist(nodesRef.current, treeNameRef.current, order);
+  }, [persist]);
+
+  const resetRowOrder = useCallback(() => {
+    setRowOrder(null);
+    rowOrderRef.current = null;
+    persist(nodesRef.current, treeNameRef.current, null);
+  }, [persist]);
 
   // ── addSpouse ─────────────────────────────────────────────────────────────
   const addSpouse = useCallback((pid, name) => {
@@ -142,12 +127,9 @@ export function useFamilyTree(uid) {
       const p = prev.find(n => n.id === pid);
       if (!p) return prev;
       const sid = getId();
-
-      // Find the true parent: prefer p.ancestorId, fallback to whoever lists pid in descendants[]
       const trueParentId = p.ancestorId
         || prev.find(n => !n.spouseOf && (n.descendants||[]).includes(pid))?.id
         || null;
-
       return [
         ...prev.map(n => {
           if (n.id === pid)          return { ...n, siblings: [...n.siblings, sid] };
@@ -183,32 +165,18 @@ export function useFamilyTree(uid) {
       if (!p) return prev;
       const aid = getId();
       const newGen = p.gen + 1;
-
-      // Collect all siblings of pid (nodes at same gen whose ancestorId is null
-      // or same as pid's current ancestorId, and are listed in pid's siblings[])
       const siblingIds = new Set(p.siblings || []);
-
       const updated = prev.map(n => {
         if (n.id === pid) return { ...n, ancestorId: aid };
-        // Also fix siblings that have broken/null ancestorId pointing to same parent
-        if (siblingIds.has(n.id) && (n.ancestorId === p.ancestorId || n.ancestorId === null)) {
+        if (siblingIds.has(n.id) && (n.ancestorId === p.ancestorId || n.ancestorId === null))
           return { ...n, ancestorId: aid };
-        }
         return n;
       });
-
-      // New ancestor's descendants = pid + all its siblings that got re-parented
       const newDescendants = [pid, ...Array.from(siblingIds).filter(sid => {
         const s = prev.find(n => n.id === sid);
         return s && (s.ancestorId === p.ancestorId || s.ancestorId === null);
       })];
-
-      const newNode = {
-        id: aid, name: name.trim(), gen: newGen,
-        ancestorId: null, spouseOf: null,
-        descendants: newDescendants, siblings: [],
-      };
-      return [...updated, newNode];
+      return [...updated, { id:aid, name:name.trim(), gen:newGen, ancestorId:null, spouseOf:null, descendants:newDescendants, siblings:[] }];
     });
   }, [mutate]);
 
@@ -218,9 +186,39 @@ export function useFamilyTree(uid) {
     nextId.current = makeIdGen(1);
     setNodes([]);
     setTreeName('Family Tree');
+    setRowOrder(null);
+    rowOrderRef.current = null;
     setInitDone(false);
-    if (uid) fsSave(uid, [], { treeName: 'Family Tree' }).catch(console.error);
+    if (uid) fsSave(uid, [], { treeName: 'Family Tree', rowOrder: null }).catch(console.error);
   }, [uid]);
 
-  return { nodes, treeName, loading, saving, initDone, initTree, addSpouse, addSibling, addChild, addAncestor, reset };
+  // ── initTree ──────────────────────────────────────────────────────────────
+  const initTree = useCallback((rawInput) => {
+    const names = rawInput.trim().split(/\s+/).filter(Boolean);
+    if (!names.length) return;
+    nextId.current = makeIdGen(1);
+    const getId = () => nextId.current();
+    const newNodes = names.map((name, i) => ({
+      id: getId(), name, gen: i + 1,
+      ancestorId: null, spouseOf: null, descendants: [], siblings: [], isYoungest: i === 0,
+    }));
+    for (let i = 0; i < newNodes.length - 1; i++) {
+      newNodes[i].ancestorId = newNodes[i + 1].id;
+      newNodes[i + 1].descendants.push(newNodes[i].id);
+    }
+    const name = names[0] + "'s Family Tree";
+    lsClear();
+    setTreeName(name);
+    setNodes(newNodes);
+    setRowOrder(null);
+    rowOrderRef.current = null;
+    setInitDone(true);
+    persist(newNodes, name, null);
+  }, [persist]);
+
+  return {
+    nodes, treeName, rowOrder, loading, saving, initDone,
+    initTree, addSpouse, addSibling, addChild, addAncestor,
+    saveRowOrder, resetRowOrder, reset,
+  };
 }
