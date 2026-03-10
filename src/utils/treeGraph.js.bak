@@ -1,0 +1,236 @@
+// utils/treeGraph.js
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure functions that work on the flat members graph
+// { m1: { name, gender, year, rip, fatherId, motherId, spouseId }, ... }
+//
+// Replaces:  buildLineageRows.js  +  localTree.js  (old array-based logic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Basic accessors ────────────────────────────────────────────────────────────
+
+export const getSpouse    = (members, id) => members[members[id]?.spouseId] || null;
+export const getFather    = (members, id) => members[members[id]?.fatherId] || null;
+export const getMother    = (members, id) => members[members[id]?.motherId] || null;
+
+export const getChildren  = (members, parentId) =>
+  Object.entries(members)
+    .filter(([, m]) => m.fatherId === parentId || m.motherId === parentId)
+    .map(([id, m]) => ({ ...m, id }));
+
+export const getSiblings  = (members, id) => {
+  const m = members[id];
+  if (!m) return [];
+  return Object.entries(members)
+    .filter(([sid, s]) =>
+      sid !== id &&
+      ((m.fatherId && s.fatherId === m.fatherId) ||
+       (m.motherId && s.motherId === m.motherId))
+    )
+    .map(([sid, s]) => ({ ...s, id: sid }));
+};
+
+// ── Ancestor chain (oldest first) ──────────────────────────────────────────────
+
+export function getAncestorChain(members, startId, maxDepth = 10) {
+  const chain = [];
+  let currentId = startId;
+  let depth = 0;
+
+  while (depth < maxDepth) {
+    const m = members[currentId];
+    if (!m) break;
+    const fatherId = m.fatherId;
+    if (!fatherId || !members[fatherId]) break;
+    chain.push({ ...members[fatherId], id: fatherId });
+    currentId = fatherId;
+    depth++;
+  }
+  return chain; // [father, grandfather, great-grandfather, ...]
+}
+
+// ── Descendant chain (BFS) ──────────────────────────────────────────────────
+
+export function getDescendantChain(members, startId, maxDepth = 5) {
+  const results = [];
+  const queue   = [{ id: startId, depth: 0 }];
+  const visited = new Set([startId]);
+
+  while (queue.length > 0) {
+    const { id, depth } = queue.shift();
+    if (depth >= maxDepth) continue;
+
+    const children = getChildren(members, id);
+    children.forEach(child => {
+      if (visited.has(child.id)) return;
+      visited.add(child.id);
+      results.push({ ...child, depth: depth + 1 });
+      queue.push({ id: child.id, depth: depth + 1 });
+    });
+  }
+  return results;
+}
+
+// ── VSCode-style tree node builder ────────────────────────────────────────────
+// Builds the nested node tree used by VscRow + the Explorer view.
+
+export function buildVscTree(members, selfId) {
+  if (!selfId || !members[selfId]) return null;
+
+  const self = members[selfId];
+
+  const makeNode = (id, type, relation) => {
+    if (!id || !members[id]) return null;
+    const m = members[id];
+    return {
+      id, type, relation,
+      name:   m.name,
+      gender: m.gender,
+      year:   m.year,
+      rip:    m.rip || false,
+      spouse: m.spouseId && members[m.spouseId]
+        ? { ...members[m.spouseId], id: m.spouseId }
+        : null,
+      siblings: getSiblings(members, id).map((s, i) => ({
+        ...s, type:"sib", children:[], siblings:[], spouse:null,
+      })),
+      children: [],
+      _childCount: 0,
+    };
+  };
+
+  // Self node
+  const selfNode = makeNode(selfId, "you", "YOU");
+  if (!selfNode) return null;
+
+  // Add direct children to self
+  const children = getChildren(members, selfId);
+  selfNode.children     = children.map(c => ({
+    ...makeNode(c.id, "child", "son/daughter"),
+    children: [],
+  })).filter(Boolean);
+  selfNode._childCount  = selfNode.children.length;
+
+  // Chain ancestors above self
+  const ancestors = getAncestorChain(members, selfId);
+  let cur = selfNode;
+
+  ancestors.forEach((anc, i) => {
+    const ancNode = makeNode(anc.id, "anc", anc.relation || `ancestor ${i+1}`);
+    if (!ancNode) return;
+    ancNode.children    = [cur];
+    ancNode._childCount = 1;
+    cur = ancNode;
+  });
+
+  return cur; // root = oldest known ancestor
+}
+
+// ── Lineage table rows builder ─────────────────────────────────────────────────
+// Replaces buildLineageRows.js. Returns { rows, spanMap, ancestors }
+// rows = [ { desc, self, ancs[] } ]
+
+export function buildLineageRows(members, selfId) {
+  if (!selfId || !members) return { rows:[], spanMap:{}, ancestors:[] };
+
+  const self      = members[selfId];
+  const ancestors = getAncestorChain(members, selfId); // [father, gf, ggf, ...]
+  const children  = getChildren(members, selfId);
+  const selfSpouse = self?.spouseId ? members[self.spouseId] : null;
+
+  const makePersonCell = (id) => {
+    if (!id || !members[id]) return null;
+    const m = members[id];
+    return {
+      name:   m.name,
+      gender: m.gender,
+      spouse: m.spouseId && members[m.spouseId]
+        ? { name:members[m.spouseId].name, gender:members[m.spouseId].gender }
+        : null,
+    };
+  };
+
+  const selfCell = {
+    name:   self?.name,
+    gender: self?.gender,
+    spouse: selfSpouse ? { name:selfSpouse.name, gender:selfSpouse.gender } : null,
+    isYou:  true,
+  };
+
+  const ancCells = ancestors.map(a => makePersonCell(a.id));
+
+  const rows = [];
+  const addedIds = new Set(); // prevent duplicate rows
+
+  // A. One row per child of self (children share same father/mother = selfId)
+  // Do NOT add child's siblings separately — they are already children themselves
+  if (children.length > 0) {
+    children.forEach(child => {
+      if (addedIds.has(child.id)) return;
+      addedIds.add(child.id);
+      rows.push({ desc: makePersonCell(child.id), self: selfCell, ancs: ancCells });
+    });
+  } else {
+    // No children — show self row alone
+    rows.push({ desc: null, self: selfCell, ancs: ancCells });
+  }
+
+  // B. Siblings of self — shown as alternate "Self" rows with no descendant
+  getSiblings(members, selfId).forEach(sib => {
+    if (addedIds.has(sib.id)) return;
+    addedIds.add(sib.id);
+    rows.push({ desc: null, self: makePersonCell(sib.id), ancs: ancCells });
+  });
+
+  // C. Siblings of each ancestor — shown in their ancestor column
+  ancestors.forEach((anc, ai) => {
+    getSiblings(members, anc.id).forEach(sib => {
+      if (addedIds.has(sib.id)) return;
+      addedIds.add(sib.id);
+      // Build anc cells: ancestors above the sibling's level stay, sibling goes in their slot
+      const sibAncs = ancestors.map((a, i) => {
+        if (i < ai)  return makePersonCell(a.id); // ancestors above — unchanged
+        if (i === ai) return makePersonCell(sib.id); // sibling replaces ancestor at this level
+        return null; // ancestors below sibling's level — not applicable
+      });
+      rows.push({ desc: null, self: null, ancs: sibAncs });
+    });
+  });
+
+  // Compute rowSpan map
+  const spanMap = {};
+  const computeSpans = (colKey, getName) => {
+    let ri = 0;
+    while (ri < rows.length) {
+      const name = getName(rows[ri]);
+      if (!name) { spanMap[colKey+"_"+ri] = 1; ri++; continue; }
+      let span = 1;
+      while (ri + span < rows.length && getName(rows[ri+span]) === name) span++;
+      spanMap[colKey+"_"+ri] = span;
+      for (let k = 1; k < span; k++) spanMap[colKey+"_"+(ri+k)] = 0;
+      ri += span;
+    }
+  };
+
+  computeSpans("self", r => r.self?.name || null);
+  ancestors.forEach((_, i) => computeSpans("anc"+i, r => r.ancs[i]?.name || null));
+
+  return { rows, spanMap, ancestors };
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+
+export function computeStats(members) {
+  const all = Object.values(members);
+  return {
+    total:   all.length,
+    living:  all.filter(m => !m.rip).length,
+    males:   all.filter(m => m.gender === "M").length,
+    females: all.filter(m => m.gender === "F").length,
+  };
+}
+
+// ── All members as flat array ─────────────────────────────────────────────────
+
+export function membersArray(members) {
+  return Object.entries(members).map(([id, m]) => ({ ...m, id }));
+}

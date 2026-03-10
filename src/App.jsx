@@ -26,7 +26,7 @@ const ProfilePage            = lazy(() => import("./pages/ProfilePage"));
 const StudentsPage           = lazy(() => import("./pages/StudentsPage"));
 const VanshTreeView          = lazy(() => import("./pages/VanshTreeView"));
 const VanshVriksha            = lazy(() => import("./pages/VanshVriksha"));
-
+const FamilyTree              = lazy(() => import("./pages/FamilyTree"));
 function AppRoutes() {
   const { ready } = useAuth();
   if (!ready) return <Spinner message="Loading…" />;
@@ -57,7 +57,8 @@ function AppRoutes() {
         <Route path="/admin-delete" element={<AdminDeleteUser />} />
         </Route>
           <Route path="/vansh" element={<VanshVriksha />} />
-          <Route path="/tree" element={<VanshTreeView />} />
+          <Route path="/tree1" element={<VanshTreeView />} />
+          <Route path="/tree" element={<FamilyTree uid={"user?.uid"} />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

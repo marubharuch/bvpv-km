@@ -1,281 +1,240 @@
 // pages/VanshTreeView/index.jsx
 // ─────────────────────────────────────────────────────────────────────────────
-// Multi-view family tree viewer with 6 view modes + VSCode explorer branches.
-// Views: Explorer | Vertical | OrgChart | Living | Table | Cards
+// Multi-view family tree viewer. Loads from families/{familyId} via useTreeData.
+// Views: Explorer | Vertical | OrgChart | Living | Table | Cards | Lineage
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth }      from "../../store/AuthContext";
-import { getVanshTree } from "../../db/vanshTreeDb";
-import VscRow           from "../../components/vansh/VscRow";
-import { VSC }          from "../../constants/vanshConstants";
+import { useNavigate }       from "react-router-dom";
+import { useAuth }           from "../../store/AuthContext";
+import { useTreeData }       from "../../hooks/useTreeData";
+import { getUserFamilyPointer } from "../../db/familyTreeDb";
+import { migrateIfNeeded }   from "../../utils/migration";
+import {
+  buildVscTree, buildLineageRows,
+  membersArray, computeStats, computeLineageStats, getAncestorChain, getChildren,
+} from "../../utils/treeGraph";
+import VscRow            from "../../components/vansh/VscRow";
+import { VSC }           from "../../constants/vanshConstants";
+import SyncBadge         from "./components/SyncBadge";
+import LineageView        from "./components/LineageView";
+import ReviewSaveSheet    from "./components/ReviewSaveSheet";
 
 const C = {
-  bg:           "#FDF6EC",
-  primary:      "#7B1C2E",
-  primaryDark:  "#5A1020",
-  primaryLight: "#9B2335",
-  gold:         "#C9A84C",
-  goldLight:    "#F0D080",
-  goldFaint:    "#FDF0D0",
-  border:       "#f0e6e6",
-  textPrimary:  "#3D0010",
-  textSecondary:"#9B6060",
-  textMuted:    "#C0A0A0",
-  error:        "#ef4444",
-  white:        "#FFFFFF",
-  green:        "#2E7D32",
+  bg:"#FDF6EC", primary:"#7B1C2E", primaryDark:"#5A1020", primaryLight:"#9B2335",
+  gold:"#C9A84C", goldLight:"#F0D080", goldFaint:"#FDF0D0", border:"#f0e6e6",
+  textPrimary:"#3D0010", textSecondary:"#9B6060", textMuted:"#C0A0A0",
+  error:"#ef4444", white:"#FFFFFF", green:"#2E7D32",
 };
-
-const mono = "'JetBrains Mono', monospace";
+const mono  = "'JetBrains Mono', monospace";
 const serif = "'Playfair Display', serif";
 
-// ── View mode config ──────────────────────────────────────────────────────────
 const VIEWS = [
-  { id: "explorer", icon: "📁", label: "Explorer",  short: "VSCode" },
-  { id: "vertical", icon: "⬆️", label: "Vertical",  short: "Chain"  },
-  { id: "org",      icon: "↔️", label: "Org Chart", short: "Chart"  },
-  { id: "living",   icon: "💚", label: "Living",    short: "Alive"  },
-  { id: "table",    icon: "📋", label: "Table",     short: "Table"  },
-  { id: "cards",    icon: "🃏", label: "Cards",     short: "Cards"  },
-  { id: "lineage",  icon: "📜", label: "Lineage",   short: "Table"  },
+  { id:"explorer", icon:"📁", label:"Explorer" },
+  { id:"vertical", icon:"⬆️", label:"Vertical" },
+  { id:"org",      icon:"↔️", label:"Org Chart" },
+  { id:"living",   icon:"💚", label:"Living"   },
+  { id:"table",    icon:"📋", label:"Table"    },
+  { id:"cards",    icon:"🃏", label:"Cards"    },
+  { id:"lineage",  icon:"📜", label:"Lineage"  },
 ];
 
-// ── VSCode Explorer branch filter options ─────────────────────────────────────
 const BRANCH_FILTERS = [
-  { id: "all",        label: "All Branches",      icon: "🌳" },
-  { id: "ancestors",  label: "Ancestors Only",    icon: "⬆️" },
-  { id: "descendants",label: "Descendants Only",  icon: "⬇️" },
-  { id: "spouses",    label: "With Spouses",      icon: "💑" },
-  { id: "siblings",   label: "With Siblings",     icon: "👥" },
-  { id: "cousins",    label: "Cousins",           icon: "🤝" },
-  { id: "rip",        label: "Deceased Only",     icon: "🪔" },
-  { id: "male",       label: "Male Line",         icon: "👨" },
-  { id: "female",     label: "Female Line",       icon: "👩" },
+  { id:"all",         label:"All Branches",    icon:"🌳" },
+  { id:"ancestors",   label:"Ancestors Only",  icon:"⬆️" },
+  { id:"descendants", label:"Descendants",     icon:"⬇️" },
+  { id:"spouses",     label:"With Spouses",    icon:"💑" },
+  { id:"siblings",    label:"With Siblings",   icon:"👥" },
+  { id:"rip",         label:"Deceased Only",   icon:"🪔" },
+  { id:"male",        label:"Male Line",       icon:"👨" },
+  { id:"female",      label:"Female Line",     icon:"👩" },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BUILD TREE HELPER
-// ─────────────────────────────────────────────────────────────────────────────
-function buildTree(self, ancestors = [], descendants = [], spouses = {}, siblings = {}) {
-  const ancs  = (ancestors  || []).filter(a => a?.name);
-  const descs = (descendants|| []).filter(d => d?.name);
-
-  const getSibsFor = id => {
-    if (!siblings?.[id]) return [];
-    return [...(siblings[id].elder||[]),...(siblings[id].younger||[])]
-      .filter(x => x?.name)
-      .map((x,i) => ({ ...x, id: id+"_sib"+i, type:"sib", spouse:null, siblings:[], children:[] }));
-  };
-
-  const selfNode = {
-    id:"self", name:self?.name||"", gender:self?.gender||"",
-    year:self?.year||"", rip:false, relation:"YOU", type:"you",
-    spouse: spouses["self"]||null,
-    siblings: getSibsFor("self"),
-    _childCount: descs.length,
-    children: descs.map((d,i) => ({
-      id:"desc"+i, name:d.name, gender:d.gender,
-      year:d.year, rip:d.rip||false, relation:d.relation,
-      type:"child",
-      spouse: spouses["desc_"+d.relation]||null,
-      siblings:[], children:[],
-    })),
-  };
-
-  let cur = selfNode;
-  ancs.forEach((anc,i) => {
-    cur = {
-      id:"anc"+i, name:anc.name, gender:anc.gender,
-      year:anc.year, rip:anc.rip||false, relation:anc.relation,
-      type:"anc",
-      spouse: spouses["anc_"+anc.relation]||null,
-      siblings: getSibsFor("anc_"+i),
-      children:[cur], _childCount:1,
-    };
-  });
-  return cur;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RENDER TREE ROWS (VSCode Explorer)
-// ─────────────────────────────────────────────────────────────────────────────
-function renderNode(node, guides, expanded, selId, toggle, select, branchFilter) {
-  if (!node) return [];
-  const rows   = [];
-  const hasCh  = node.children?.length > 0;
-  const isOpen = expanded.has(node.id);
-
-  // Apply branch filter
-  const showNode = applyBranchFilter(node, branchFilter);
-  if (!showNode) return [];
-
-  rows.push(
-    <VscRow key={"r_"+node.id} node={node} guides={guides}
-      hasChildren={hasCh} isOpen={isOpen}
-      onToggle={()=>toggle(node.id)} onSelect={()=>select(node.id)}
-      isSelected={selId===node.id} />
-  );
-
-  if (branchFilter !== "ancestors" && branchFilter !== "descendants" && branchFilter !== "rip" && branchFilter !== "male" && branchFilter !== "female") {
-    if (node.spouse?.name && (branchFilter === "all" || branchFilter === "spouses"))
-      rows.push(
-        <VscRow key={"sp_"+node.id}
-          node={{...node.spouse, id:node.id+"_sp", type:"spouse", relation:"♥ spouse"}}
-          guides={guides.map(g=>({...g}))} hasChildren={false}
-          isSelected={selId===node.id+"_sp"} onSelect={()=>select(node.id+"_sp")} />
-      );
-
-    if (branchFilter === "all" || branchFilter === "siblings")
-      (node.siblings||[]).forEach((sib,si) => {
-        const sibIsLast = si===node.siblings.length-1;
-        const sg = guides.map(g=>g.type==="conn"?{type:"vl"}:g.type==="last"?{type:"blank"}:{...g});
-        sg.push({type:sibIsLast?"last":"conn"});
-        rows.push(
-          <VscRow key={"sib_"+sib.id} node={sib} guides={sg} hasChildren={false}
-            isSelected={selId===sib.id} onSelect={()=>select(sib.id)} />
-        );
-      });
-  }
-
-  if (hasCh && isOpen)
-    node.children.forEach((child,ci) => {
-      const cg = guides.map(g=>g.type==="conn"?{type:"vl"}:g.type==="last"?{type:"blank"}:{...g});
-      cg.push({type:ci===node.children.length-1?"last":"conn"});
-      rows.push(...renderNode(child, cg, expanded, selId, toggle, select, branchFilter));
-    });
-
-  return rows;
-}
-
-function applyBranchFilter(node, filter) {
-  if (filter === "all")         return true;
-  if (filter === "ancestors")   return node.type === "anc"   || node.type === "you";
-  if (filter === "descendants") return node.type === "child" || node.type === "you";
-  if (filter === "rip")         return node.rip === true;
-  if (filter === "male")        return node.gender === "M";
-  if (filter === "female")      return node.gender === "F";
-  return true; // spouses, siblings, cousins — show all nodes, filter children only
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function VanshTreeView() {
   const { user }  = useAuth();
   const navigate  = useNavigate();
 
-  const [treeData,     setTreeData]     = useState(null);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState("");
+  const [familyId,  setFamilyId]  = useState(null);
+  const [selfId,    setSelfId]    = useState(null);
+  const [booting,   setBooting]   = useState(true);
+
+  // Resolve familyId on mount (with migration if needed)
+  useEffect(() => {
+    if (!user?.uid) { setBooting(false); return; }
+    migrateIfNeeded(user.uid)
+      .then(pointer => {
+        if (pointer?.familyId) {
+          setFamilyId(pointer.familyId);
+          setSelfId(pointer.memberId);
+        }
+        setBooting(false);
+      })
+      .catch(e => { console.error(e); setBooting(false); });
+  }, [user?.uid]);
+
+  const {
+    members, treeDoc, status, isLoading, isSyncing, isOnline,
+    syncError, syncNow, pendingChanges, clearPendingChanges,
+    editTreeMember, addTreeMember,
+  } = useTreeData(familyId, user?.uid);
+
   const [view,         setView]         = useState("explorer");
   const [branchFilter, setBranchFilter] = useState("all");
-  const [expanded,     setExpanded]     = useState(new Set(["self"]));
+  const [expanded,     setExpanded]     = useState(new Set());
   const [selId,        setSelId]        = useState(null);
-  const [selNode,      setSelNode]      = useState(null);
   const [showPanel,    setShowPanel]    = useState(false);
   const [showBranches, setShowBranches] = useState(false);
+  const [showReview,   setShowReview]   = useState(false);
   const [tableSearch,  setTableSearch]  = useState("");
   const [tableSortGen, setTableSortGen] = useState(true);
 
-  // ── Load ────────────────────────────────────────────────────────────────────
+  // Expand root on load
   useEffect(() => {
-    if (!user?.uid) { setLoading(false); return; }
-    getVanshTree(user.uid)
-      .then(d => { if (d) setTreeData(d); })
-      .catch(e => { console.error(e); setError("Tree લોડ કરવામાં ભૂલ."); })
-      .finally(() => setLoading(false));
-  }, [user?.uid]);
+    if (selfId) setExpanded(new Set([selfId]));
+  }, [selfId]);
 
   const toggle = useCallback(id => setExpanded(p => {
-    const n = new Set(p); n.has(id)?n.delete(id):n.add(id); return n;
+    const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
   }), []);
 
-  const select = useCallback((id, node) => {
-    setSelId(id); setSelNode(node); setShowPanel(true);
-  }, []);
+  const select = useCallback((id) => { setSelId(id); setShowPanel(true); }, []);
 
-  // ── Derived data ────────────────────────────────────────────────────────────
-  const allMembers = useMemo(() => {
-    if (!treeData) return [];
-    return [
-      treeData.self,
-      ...(treeData.ancestors  ||[]).filter(a=>a?.name),
-      ...(treeData.descendants||[]).filter(d=>d?.name),
-      ...Object.values(treeData.spouses||{}).filter(Boolean),
-    ].filter(m=>m?.name);
-  }, [treeData]);
+  // ── Derived data ─────────────────────────────────────────────────────────
+  const allMembers   = useMemo(() => membersArray(members), [members]);
+  const stats        = useMemo(() => computeStats(members), [members]);
+  const lineageStats = useMemo(() => computeLineageStats(members, selfId), [members, selfId]);
+  const livingMembers= useMemo(() => allMembers.filter(m => !m.rip), [allMembers]);
 
-  const livingMembers = useMemo(() =>
-    allMembers.filter(m => !m.rip), [allMembers]);
+  const root = useMemo(() => selfId ? buildVscTree(members, selfId) : null, [members, selfId]);
 
-  const stats = useMemo(() => ({
-    total:   allMembers.length,
-    living:  livingMembers.length,
-    ancs:    (treeData?.ancestors  ||[]).filter(a=>a?.name).length,
-    descs:   (treeData?.descendants||[]).filter(d=>d?.name).length,
-    males:   allMembers.filter(m=>m.gender==="M").length,
-    females: allMembers.filter(m=>m.gender==="F").length,
-  }), [allMembers, livingMembers, treeData]);
+  const ancestors = useMemo(() =>
+    selfId ? getAncestorChain(members, selfId) : [], [members, selfId]);
 
-  // ── Table data (generation rows) ───────────────────────────────────────────
   const tableRows = useMemo(() => {
-    if (!treeData) return [];
-    const ancs  = (treeData.ancestors  ||[]).filter(a=>a?.name);
-    const descs = (treeData.descendants||[]).filter(d=>d?.name);
+    if (!selfId) return [];
 
-    const rows = [
-      ...ancs.map((a,i)  => ({ ...a, gen: -(ancs.length - i),  genLabel: `G-${ancs.length - i}`,  role:"Ancestor"   })),
-      { ...treeData.self, gen: 0, genLabel: "YOU",              role:"Self"       },
-      ...descs.map((d,i) => ({ ...d, gen: i+1,                  genLabel: `G+${i+1}`,             role:"Descendant" })),
-    ];
+    // ── Step 1: BFS to assign a generation number to every reachable member ──
+    // gen = 0 for self, -1 for father, -2 for grandfather, +1 for child, etc.
+    // We walk: parent links (fatherId/motherId) going UP, children going DOWN,
+    // and spouseId sideways (same gen as partner).
+    // Siblings share the same gen as the person whose parents they share.
+
+    const genMap  = {};   // id → gen number
+    const roleMap = {};   // id → human-readable role
+    const queue   = [{ id: selfId, gen: 0 }];
+    const visited = new Set();
+
+    genMap[selfId]  = 0;
+    roleMap[selfId] = "Self";
+    visited.add(selfId);
+
+    while (queue.length > 0) {
+      const { id, gen } = queue.shift();
+      const m = members[id];
+      if (!m) continue;
+
+      // Father → gen - 1
+      if (m.fatherId && !visited.has(m.fatherId) && members[m.fatherId]) {
+        visited.add(m.fatherId);
+        genMap[m.fatherId]  = gen - 1;
+        roleMap[m.fatherId] = roleMap[m.fatherId] || "Ancestor";
+        queue.push({ id: m.fatherId, gen: gen - 1 });
+      }
+      // Mother → gen - 1 (same generation as father)
+      if (m.motherId && !visited.has(m.motherId) && members[m.motherId]) {
+        visited.add(m.motherId);
+        genMap[m.motherId]  = gen - 1;
+        roleMap[m.motherId] = roleMap[m.motherId] || (gen - 1 < 0 ? "Ancestor" : "Parent");
+        queue.push({ id: m.motherId, gen: gen - 1 });
+      }
+      // Spouse → same gen (sideways)
+      if (m.spouseId && !visited.has(m.spouseId) && members[m.spouseId]) {
+        visited.add(m.spouseId);
+        genMap[m.spouseId]  = gen;
+        roleMap[m.spouseId] = `Spouse of ${m.name}`;
+        queue.push({ id: m.spouseId, gen });
+      }
+      // Children → gen + 1
+      Object.entries(members).forEach(([cid, cm]) => {
+        if (visited.has(cid)) return;
+        if (cm.fatherId === id || cm.motherId === id) {
+          visited.add(cid);
+          genMap[cid]  = gen + 1;
+          roleMap[cid] = gen + 1 === 1 ? "Child"
+            : gen + 1 === 2 ? "Grandchild"
+            : `G+${gen + 1}`;
+          queue.push({ id: cid, gen: gen + 1 });
+        }
+      });
+    }
+
+    // ── Step 2: Siblings — share same gen as the person whose parents they share ─
+    Object.entries(members).forEach(([id, m]) => {
+      if (visited.has(id)) return; // already assigned
+      // Find any already-assigned member that shares a parent
+      const sharedParent = Object.entries(members).find(([pid]) => {
+        if (!genMap.hasOwnProperty(pid)) return false;
+        const pm = members[pid];
+        return (m.fatherId && m.fatherId === pm.fatherId) ||
+               (m.motherId && m.motherId === pm.motherId);
+      });
+      if (sharedParent) {
+        const [sibId] = sharedParent;
+        const sibGen  = genMap[sibId];
+        genMap[id]    = sibGen;
+        roleMap[id]   = `Sibling of ${members[sibId]?.name || sibId}`;
+        visited.add(id);
+        // Also assign their spouse
+        if (m.spouseId && !visited.has(m.spouseId) && members[m.spouseId]) {
+          genMap[m.spouseId]  = sibGen;
+          roleMap[m.spouseId] = `Spouse of ${m.name}`;
+          visited.add(m.spouseId);
+        }
+      }
+    });
+
+    // ── Step 3: Build rows for ALL members ────────────────────────────────────
+    const rows = Object.entries(members).map(([id, m]) => {
+      const gen  = genMap.hasOwnProperty(id) ? genMap[id] : 99;
+      const role = roleMap[id] || (m.relation ? m.relation : "Unlinked");
+      const genLabel = id === selfId    ? "YOU"
+        : gen === 99                    ? (m.relation || "—")
+        : gen === 0 && id !== selfId    ? "G 0"
+        : gen > 0                       ? `G+${gen}`
+        : `G${gen}`; // e.g. G-1, G-2, G-3
+      return { ...m, id, gen, genLabel, role };
+    });
 
     const q = tableSearch.toLowerCase();
-    const filtered = q ? rows.filter(r => r.name?.toLowerCase().includes(q) || r.relation?.toLowerCase().includes(q)) : rows;
-    return tableSortGen ? filtered.sort((a,b)=>a.gen-b.gen) : filtered.sort((a,b)=>a.name?.localeCompare(b.name));
-  }, [treeData, tableSearch, tableSortGen]);
+    const filtered = q ? rows.filter(r => r.name?.toLowerCase().includes(q)) : rows;
+    return tableSortGen
+      ? filtered.sort((a,b) => a.gen - b.gen || (a.name||"").localeCompare(b.name||""))
+      : filtered.sort((a,b) => (a.name||"").localeCompare(b.name||""));
+  }, [members, selfId, tableSearch, tableSortGen]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // LOADING / ERROR / EMPTY states
-  // ─────────────────────────────────────────────────────────────────────────
-  if (loading) return (
+  // ── Loading / error / empty states ───────────────────────────────────────
+  if (booting || isLoading) return (
     <Center>
-      <div style={{ width:40, height:40, borderRadius:"50%", border:`3px solid ${C.primary}`, borderTopColor:"transparent", animation:"spin 0.8s linear infinite" }} />
+      <Spinner />
       <p style={{ fontSize:"0.82rem", color:C.primary, fontFamily:mono, marginTop:12 }}>Tree લોડ થઈ રહ્યું છે...</p>
       <Styles />
     </Center>
   );
 
-  if (error) return (
-    <Center>
-      <div style={{ fontSize:"2.5rem" }}>⚠️</div>
-      <p style={{ color:C.error, fontSize:"0.88rem" }}>{error}</p>
-      <Btn onClick={()=>window.location.reload()}>↻ Retry</Btn>
-      <Styles />
-    </Center>
-  );
-
-  if (!treeData?.self?.name) return (
+  if (!familyId || !selfId) return (
     <Center>
       <div style={{ width:80, height:80, borderRadius:"50%", background:C.goldFaint, border:`2px dashed ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"2.5rem" }}>🌱</div>
-      <h2 style={{ fontFamily:serif, fontSize:"1.4rem", color:C.primaryDark, margin:"16px 0 8px" }}>હજી Tree બનાવ્યું નથી</h2>
-      <p style={{ fontSize:"0.82rem", color:C.textSecondary, lineHeight:1.6, maxWidth:280, textAlign:"center", margin:"0 0 20px" }}>
-        Wizard ખોલો અને family members ઉમેરો.
-      </p>
+      <h2 style={{ fontFamily:serif, fontSize:"1.4rem", color:C.primaryDark, margin:"16px 0 8px" }}>Tree બનાવ્યું નથી</h2>
+      <p style={{ fontSize:"0.82rem", color:C.textSecondary, maxWidth:280, textAlign:"center", margin:"0 0 20px" }}>Wizard ખોલો અને family members ઉમેરો.</p>
       <Btn onClick={()=>navigate("/vansh")}>🌳 Tree બનાવો</Btn>
       <Styles />
     </Center>
   );
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // TREE BUILT
-  // ─────────────────────────────────────────────────────────────────────────
-  const root    = buildTree(treeData.self, treeData.ancestors, treeData.descendants, treeData.spouses, treeData.siblings);
-  const cousins = (treeData.cousins||[]).filter(c=>c?.name);
-
-  const updatedAt = treeData.updatedAt
-    ? new Date(treeData.updatedAt).toLocaleDateString("gu-IN",{day:"2-digit",month:"long",year:"numeric"})
+  const selfMember = members[selfId] || {};
+  const updatedAt  = treeDoc?.updatedAt
+    ? new Date(treeDoc.updatedAt).toLocaleDateString("gu-IN", { day:"2-digit", month:"long", year:"numeric" })
     : null;
 
   return (
@@ -287,21 +246,58 @@ export default function VanshTreeView() {
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span>🌳</span>
           <span style={{ fontSize:"0.7rem", color:C.goldLight, letterSpacing:"0.06em" }}>
-            વંશ વૃક્ષ — {treeData.self?.name}
+            {treeDoc?.treeName || selfMember.name + "'s Family Tree"}
           </span>
+          {treeDoc?.pin && (
+            <span style={{ fontSize:"0.55rem", color:"rgba(240,208,128,0.45)", fontFamily:mono }}>
+              PIN: {treeDoc.pin}
+            </span>
+          )}
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          {pendingChanges.length > 0 ? (
+            <button onClick={()=>setShowReview(true)} style={{
+              display:"flex", alignItems:"center", gap:5, padding:"4px 12px",
+              background:`linear-gradient(135deg,${C.primary},${C.primaryDark})`,
+              color:"#fff", border:`1.5px solid ${C.gold}60`,
+              borderRadius:20, fontSize:"0.62rem", fontWeight:700,
+              cursor:"pointer", fontFamily:mono,
+              animation:"reviewPulse 2s ease-in-out infinite",
+              boxShadow:`0 2px 10px ${C.primary}50`,
+            }}>
+              <span style={{ fontSize:"0.8rem" }}>🔍</span>
+              Review & Save
+              <span style={{ background:C.gold, color:C.primaryDark, borderRadius:10, padding:"0 5px", fontSize:"0.55rem", fontWeight:900 }}>
+                {pendingChanges.length}
+              </span>
+            </button>
+          ) : (
+            <SyncBadge meta={{ isDirty:false, lastSyncedAt:treeDoc?.updatedAt }} status={status} isOnline={isOnline} syncError={syncError} onSyncNow={syncNow} />
+          )}
           {updatedAt && <span style={{ fontSize:"0.55rem", color:"rgba(240,208,128,0.5)" }}>Updated: {updatedAt}</span>}
+          <button
+            onClick={syncNow}
+            disabled={isSyncing || isLoading}
+            title="Refresh from Firestore"
+            style={{
+              padding:"4px 10px", background:"rgba(255,255,255,0.08)",
+              border:"1px solid rgba(240,208,128,0.25)", borderRadius:5,
+              fontSize:"0.85rem", cursor: isSyncing||isLoading ? "default":"pointer",
+              opacity: isSyncing||isLoading ? 0.5 : 1,
+              animation: isSyncing ? "spin 0.7s linear infinite" : "none",
+              lineHeight:1, display:"flex", alignItems:"center",
+            }}
+          >🔄</button>
           <button onClick={()=>navigate("/vansh")} style={{ padding:"4px 12px", background:C.gold, color:C.primaryDark, border:"none", borderRadius:5, fontSize:"0.68rem", fontWeight:700, cursor:"pointer", fontFamily:mono }}>
             ✏️ Edit
           </button>
         </div>
       </div>
 
-      {/* ── View switcher ────────────────────────────────────────────────────── */}
+      {/* ── View switcher ─────────────────────────────────────────────────────── */}
       <div style={{ display:"flex", background:C.white, borderBottom:`1px solid ${C.border}`, overflowX:"auto", flexShrink:0, scrollbarWidth:"none" }}>
-        {VIEWS.map(v => (
-          <button key={v.id} onClick={()=>{ setView(v.id); setShowBranches(false); }}
+        {VIEWS.map(v=>(
+          <button key={v.id} onClick={()=>{setView(v.id);setShowBranches(false);}}
             style={{ flexShrink:0, padding:"0 12px", height:36, display:"flex", alignItems:"center", gap:5, fontSize:"0.65rem", fontFamily:mono, border:"none", borderBottom:`2px solid ${view===v.id?C.primary:"transparent"}`, background:view===v.id?C.goldFaint:C.white, color:view===v.id?C.primary:C.textMuted, cursor:"pointer", fontWeight:view===v.id?700:400, transition:"all 0.15s" }}>
             <span>{v.icon}</span>
             <span className="view-label">{v.label}</span>
@@ -311,125 +307,126 @@ export default function VanshTreeView() {
 
       {/* ── Stats bar ────────────────────────────────────────────────────────── */}
       <div style={{ display:"flex", background:C.white, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
-        {[
-          { n:stats.total,   l:"Total"    },
-          { n:stats.ancs,    l:"Ancestors" },
-          { n:stats.descs,   l:"Children" },
-          { n:stats.males,   l:"Male"     },
-          { n:stats.females, l:"Female"   },
-          { n:stats.living,  l:"Living"   },
-        ].map((s,i) => (
+        {(view === "lineage" ? [
+          { n:lineageStats.total,       l:"Total"       },
+          { n:lineageStats.ancestors,   l:"Ancestors"   },
+          { n:lineageStats.children,    l:"Children"    },
+          { n:lineageStats.generations, l:"Generations" },
+          { n:lineageStats.spouses,     l:"Spouses"     },
+          { n:lineageStats.siblings,    l:"Siblings"    },
+        ] : [
+          { n:stats.total,                              l:"Total"     },
+          { n:ancestors.length,                         l:"Ancestors" },
+          { n:getChildren(members,selfId||"").length,   l:"Children"  },
+          { n:stats.males,                              l:"Male"      },
+          { n:stats.females,                            l:"Female"    },
+          { n:stats.living,                             l:"Living"    },
+        ]).map((s,i)=>(
           <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", padding:"6px 2px", borderRight:i<5?`1px solid ${C.border}`:"none" }}>
             <div style={{ fontFamily:serif, fontSize:"1rem", color:C.primary, fontWeight:700 }}>{s.n}</div>
             <div style={{ fontSize:"0.48rem", color:C.textMuted, letterSpacing:"0.07em", textTransform:"uppercase" }}>{s.l}</div>
           </div>
         ))}
       </div>
+      {/* ── View note — explains count for Lineage ──────────────────────────── */}
+      {view === "lineage" && stats.total > 0 && (
+        <div style={{ background:"#FFFBF0", borderBottom:`1px solid ${C.border}`,
+          padding:"4px 14px", fontSize:"0.58rem", color:C.textSecondary, fontFamily:mono,
+          display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+          <span>ℹ️</span>
+          Lineage shows {stats.total} members total · spouses appear inside their partner's cell · tap any cell to edit
+        </div>
+      )}
 
-      {/* ── Scrollable content ───────────────────────────────────────────────── */}
+      {/* ── Scrollable content ────────────────────────────────────────────────── */}
       <div style={{ flex:1, overflowY:"auto", overflowX:"hidden", WebkitOverflowScrolling:"touch" }}>
 
-        {/* ── EXPLORER VIEW ──────────────────────────────────────────────────── */}
-        {view === "explorer" && (
+        {/* EXPLORER */}
+        {view === "explorer" && root && (
           <>
-            {/* Branch filter bar */}
             <div style={{ background:VSC.sidebar, borderBottom:`1px solid rgba(201,168,76,0.2)` }}>
               <div style={{ display:"flex", alignItems:"center", padding:"6px 14px", gap:8 }}>
                 <span style={{ fontSize:"0.58rem", color:C.textMuted, letterSpacing:"0.1em", textTransform:"uppercase" }}>Branch:</span>
-                <button onClick={()=>setShowBranches(p=>!p)} style={{ fontSize:"0.62rem", color:C.primary, background:C.goldFaint, border:`1px solid ${C.gold}40`, borderRadius:5, padding:"3px 10px", cursor:"pointer", fontFamily:mono, display:"flex", alignItems:"center", gap:5 }}>
-                  {BRANCH_FILTERS.find(b=>b.id===branchFilter)?.icon} {BRANCH_FILTERS.find(b=>b.id===branchFilter)?.label}
-                  <span style={{ fontSize:"0.5rem" }}>{showBranches?"▲":"▼"}</span>
+                <button onClick={()=>setShowBranches(p=>!p)} style={{ fontSize:"0.62rem", color:C.primary, background:C.goldFaint, border:`1px solid ${C.gold}40`, borderRadius:5, padding:"3px 10px", cursor:"pointer", fontFamily:mono }}>
+                  {BRANCH_FILTERS.find(b=>b.id===branchFilter)?.icon} {BRANCH_FILTERS.find(b=>b.id===branchFilter)?.label} <span style={{ fontSize:"0.5rem" }}>{showBranches?"▲":"▼"}</span>
                 </button>
-                <button onClick={()=>setExpanded(new Set(["self"]))} style={{ marginLeft:"auto", fontSize:"0.58rem", color:C.textMuted, background:"none", border:`1px solid ${C.border}`, borderRadius:4, padding:"2px 8px", cursor:"pointer", fontFamily:mono }}>
-                  ⊟ collapse
-                </button>
-                <button onClick={()=>{ const all=new Set(); const addAll=n=>{if(!n)return;all.add(n.id);(n.children||[]).forEach(addAll);}; addAll(root); setExpanded(all); }} style={{ fontSize:"0.58rem", color:C.textMuted, background:"none", border:`1px solid ${C.border}`, borderRadius:4, padding:"2px 8px", cursor:"pointer", fontFamily:mono }}>
-                  ⊞ expand
-                </button>
+                <button onClick={()=>setExpanded(new Set([selfId]))} style={{ marginLeft:"auto", fontSize:"0.58rem", color:C.textMuted, background:"none", border:`1px solid ${C.border}`, borderRadius:4, padding:"2px 8px", cursor:"pointer", fontFamily:mono }}>⊟ collapse</button>
+                <button onClick={()=>{ const all=new Set(); const addAll=n=>{if(!n)return;all.add(n.id);(n.children||[]).forEach(addAll);}; addAll(root); setExpanded(all); }} style={{ fontSize:"0.58rem", color:C.textMuted, background:"none", border:`1px solid ${C.border}`, borderRadius:4, padding:"2px 8px", cursor:"pointer", fontFamily:mono }}>⊞ expand</button>
               </div>
-
-              {/* Branch dropdown */}
               {showBranches && (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:6, padding:"8px 14px 10px", borderTop:`1px solid rgba(201,168,76,0.15)` }}>
-                  {BRANCH_FILTERS.map(b => (
-                    <button key={b.id} onClick={()=>{ setBranchFilter(b.id); setShowBranches(false); }}
-                      style={{ fontSize:"0.62rem", fontFamily:mono, padding:"4px 10px", borderRadius:12, border:`1.5px solid ${branchFilter===b.id?C.primary:C.border}`, background:branchFilter===b.id?C.primary:C.white, color:branchFilter===b.id?C.white:C.textSecondary, cursor:"pointer", display:"flex", alignItems:"center", gap:4, transition:"all 0.12s" }}>
+                  {BRANCH_FILTERS.map(b=>(
+                    <button key={b.id} onClick={()=>{setBranchFilter(b.id);setShowBranches(false);}}
+                      style={{ fontSize:"0.62rem", fontFamily:mono, padding:"4px 10px", borderRadius:12, border:`1.5px solid ${branchFilter===b.id?C.primary:C.border}`, background:branchFilter===b.id?C.primary:C.white, color:branchFilter===b.id?C.white:C.textSecondary, cursor:"pointer" }}>
                       {b.icon} {b.label}
                     </button>
                   ))}
                 </div>
               )}
             </div>
-
-            {/* Explorer header */}
             <div style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", background:VSC.sidebar, borderBottom:`1px solid rgba(201,168,76,0.3)`, fontSize:"0.6rem", color:"rgba(123,28,46,0.6)", letterSpacing:"0.12em", textTransform:"uppercase" }}>
-              📁 EXPLORER — vansh-vriksha
-              <span style={{ marginLeft:"auto", fontSize:"0.55rem", color:C.textMuted }}>
-                {BRANCH_FILTERS.find(b=>b.id===branchFilter)?.icon} {BRANCH_FILTERS.find(b=>b.id===branchFilter)?.label}
-              </span>
+              📁 EXPLORER — {treeDoc?.treeName || "vansh-vriksha"}
             </div>
-
-            {/* Tree rows */}
             <div style={{ background:VSC.bg }}>
-              {renderNode(root, [], expanded, selId, toggle, (id)=>{ const n=findNodeById(root,id); select(id,n); }, branchFilter)}
+              {renderNode(root, [], expanded, selId, toggle, select, branchFilter)}
             </div>
-
-            {/* Cousins */}
-            {(branchFilter==="all"||branchFilter==="cousins") && cousins.length>0 && (
-              <>
-                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 14px", background:VSC.sidebar, borderTop:`1px solid rgba(201,168,76,0.2)`, borderBottom:`1px solid rgba(201,168,76,0.2)`, fontSize:"0.58rem", color:"rgba(123,28,46,0.6)" }}>
-                  🤝 COUSINS ({cousins.length})
-                </div>
-                {cousins.map((c,i)=>(
-                  <VscRow key={"c_"+i} node={{...c,type:"sib",id:"cousin_"+i}} guides={[{type:"last"}]} hasChildren={false}
-                    isSelected={selId==="cousin_"+i} onSelect={()=>select("cousin_"+i,c)} />
-                ))}
-              </>
-            )}
           </>
         )}
 
-        {/* ── VERTICAL CHAIN VIEW ─────────────────────────────────────────────── */}
-        {view === "vertical" && (
-          <VerticalView treeData={treeData} onSelect={select} selId={selId} />
-        )}
+        {/* VERTICAL */}
+        {view === "vertical" && <VerticalView members={members} selfId={selfId} onSelect={select} selId={selId} />}
 
-        {/* ── ORG CHART VIEW ──────────────────────────────────────────────────── */}
-        {view === "org" && (
-          <OrgChartView treeData={treeData} onSelect={select} selId={selId} />
-        )}
+        {/* LIVING */}
+        {view === "living" && <LivingView livingMembers={livingMembers} onSelect={select} selId={selId} />}
 
-        {/* ── LIVING MEMBERS VIEW ─────────────────────────────────────────────── */}
-        {view === "living" && (
-          <LivingView livingMembers={livingMembers} treeData={treeData} onSelect={select} selId={selId} />
-        )}
+        {/* TABLE */}
+        {view === "table" && <TableView rows={tableRows} search={tableSearch} onSearch={setTableSearch} sortByGen={tableSortGen} onToggleSort={()=>setTableSortGen(p=>!p)} onSelect={select} selId={selId} />}
 
-        {/* ── TABLE VIEW ──────────────────────────────────────────────────────── */}
-        {view === "table" && (
-          <TableView rows={tableRows} search={tableSearch} onSearch={setTableSearch} sortByGen={tableSortGen} onToggleSort={()=>setTableSortGen(p=>!p)} onSelect={select} selId={selId} />
-        )}
+        {/* CARDS */}
+        {view === "cards" && <CardsView allMembers={allMembers} selfId={selfId} onSelect={select} selId={selId} />}
 
-        {/* ── CARDS VIEW ──────────────────────────────────────────────────────── */}
-        {view === "cards" && (
-          <CardsView allMembers={allMembers} treeData={treeData} onSelect={select} selId={selId} />
-        )}
-
-        {/* ── LINEAGE TABLE VIEW ───────────────────────────────────────────────── */}
+        {/* LINEAGE */}
         {view === "lineage" && (
-          <LineageView treeData={treeData} />
+          <LineageView
+            members={members}
+            selfId={selfId}
+            onEditMember={editTreeMember}
+            onAddMember={addTreeMember}
+          />
         )}
 
         <div style={{ height:80 }} />
       </div>
 
-      {/* ── Selected node panel ──────────────────────────────────────────────── */}
-      {showPanel && selNode && (
-        <NodePanel node={selNode} onClose={()=>setShowPanel(false)} onEdit={()=>navigate("/vansh")} />
+      {/* ── Review & Save sheet ──────────────────────────────────────────────── */}
+      {showReview && (
+        <ReviewSaveSheet
+          pendingChanges={pendingChanges}
+          meta={{ isDirty: pendingChanges.length > 0, lastSyncedAt: treeDoc?.updatedAt }}
+          status={status}
+          isOnline={isOnline}
+          syncError={syncError}
+          onSyncNow={syncNow}
+          onClose={()=>setShowReview(false)}
+          onDiscardAll={clearPendingChanges}
+        />
+      )}
+
+      {/* ── Node panel ───────────────────────────────────────────────────────── */}
+      {showPanel && selId && members[selId] && (
+        <NodePanel
+          member={{ ...members[selId], id:selId }}
+          selfId={selfId}
+          onClose={()=>setShowPanel(false)}
+          onEdit={()=>navigate("/vansh")}
+        />
       )}
 
       {/* ── Status bar ───────────────────────────────────────────────────────── */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 12px", height:22, background:C.primaryDark, flexShrink:0 }}>
-        <span style={{ fontSize:"0.55rem", color:"rgba(240,208,128,0.7)", fontFamily:mono }}>🌳 vansh-vriksha · {VIEWS.find(v=>v.id===view)?.label}</span>
+        <span style={{ fontSize:"0.55rem", color:"rgba(240,208,128,0.7)", fontFamily:mono }}>
+          🌳 {treeDoc?.familyId} · {VIEWS.find(v=>v.id===view)?.label}
+        </span>
         <span style={{ fontSize:"0.55rem", color:"rgba(240,208,128,0.7)", fontFamily:mono }}>{stats.total} members</span>
       </div>
     </div>
@@ -437,63 +434,81 @@ export default function VanshTreeView() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VIEW: VERTICAL CHAIN
+// VSCode explorer renderer
 // ─────────────────────────────────────────────────────────────────────────────
-function VerticalView({ treeData, onSelect, selId }) {
-  const ancs  = [...(treeData.ancestors||[])].filter(a=>a?.name).reverse();
-  const descs = (treeData.descendants||[]).filter(d=>d?.name);
-  const chain = [
-    ...ancs.map((a,i)  => ({ ...a, type:"anc"  })),
-    { ...treeData.self,   type:"you"   },
-    ...descs.map((d,i) => ({ ...d, type:"child" })),
-  ];
+function applyBranchFilter(node, filter) {
+  if (filter === "all")         return true;
+  if (filter === "ancestors")   return node.type === "anc"   || node.type === "you";
+  if (filter === "descendants") return node.type === "child" || node.type === "you";
+  if (filter === "rip")         return node.rip === true;
+  if (filter === "male")        return node.gender === "M";
+  if (filter === "female")      return node.gender === "F";
+  return true;
+}
 
+function renderNode(node, guides, expanded, selId, toggle, select, branchFilter) {
+  if (!node || !applyBranchFilter(node, branchFilter)) return [];
+  const rows   = [];
+  const hasCh  = node.children?.length > 0;
+  const isOpen = expanded.has(node.id);
+
+  rows.push(<VscRow key={"r_"+node.id} node={node} guides={guides}
+    hasChildren={hasCh} isOpen={isOpen}
+    onToggle={()=>toggle(node.id)} onSelect={()=>select(node.id)}
+    isSelected={selId===node.id} />);
+
+  if (["all","spouses"].includes(branchFilter) && node.spouse?.name)
+    rows.push(<VscRow key={"sp_"+node.id}
+      node={{...node.spouse, id:node.id+"_sp", type:"spouse", relation:"♥ spouse"}}
+      guides={guides.map(g=>({...g}))} hasChildren={false}
+      isSelected={selId===node.id+"_sp"} onSelect={()=>select(node.id+"_sp")} />);
+
+  if (["all","siblings"].includes(branchFilter))
+    (node.siblings||[]).forEach((sib,si) => {
+      const sg = guides.map(g=>g.type==="conn"?{type:"vl"}:g.type==="last"?{type:"blank"}:{...g});
+      sg.push({type:si===node.siblings.length-1?"last":"conn"});
+      rows.push(<VscRow key={"sib_"+sib.id} node={sib} guides={sg} hasChildren={false}
+        isSelected={selId===sib.id} onSelect={()=>select(sib.id)} />);
+    });
+
+  if (hasCh && isOpen)
+    node.children.forEach((child,ci) => {
+      const cg = guides.map(g=>g.type==="conn"?{type:"vl"}:g.type==="last"?{type:"blank"}:{...g});
+      cg.push({type:ci===node.children.length-1?"last":"conn"});
+      rows.push(...renderNode(child, cg, expanded, selId, toggle, select, branchFilter));
+    });
+  return rows;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-views (Vertical, Living, Table, Cards)
+// ─────────────────────────────────────────────────────────────────────────────
+function VerticalView({ members, selfId, onSelect, selId }) {
+  const ancestors = getAncestorChain(members, selfId).reverse();
+  const children  = getChildren(members, selfId);
+  const chain = [
+    ...ancestors.map(a => ({ ...a, type:"anc"   })),
+    { ...members[selfId], id:selfId, type:"you"   },
+    ...children.map(c  => ({ ...c,  type:"child" })),
+  ];
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 20px" }}>
-      <div style={{ fontSize:"0.6rem", color:C.textMuted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:20, fontFamily:mono }}>
-        ⬆️ Oldest → Youngest ⬇️
-      </div>
-      {chain.map((m, i) => (
-        <div key={i} style={{ display:"flex", flexDirection:"column", alignItems:"center", width:"100%", maxWidth:320 }}>
-          <div
-            onClick={()=>onSelect("v_"+i, m)}
-            style={{
-              width:"100%", padding:"12px 16px",
-              background: m.type==="you"?C.goldFaint : m.type==="anc"?"#FFFAF5":C.white,
-              border:`2px solid ${selId==="v_"+i?C.primary : m.type==="you"?C.gold:C.border}`,
-              borderLeft:`4px solid ${m.type==="you"?C.gold:m.type==="anc"?C.primaryLight:C.primary}`,
-              borderRadius:10, cursor:"pointer",
-              boxShadow: selId==="v_"+i?`0 4px 16px ${C.primary}30`:"0 1px 4px rgba(0,0,0,0.05)",
-              transition:"all 0.15s",
-              display:"flex", alignItems:"center", gap:12,
-            }}
-          >
-            <div style={{ width:36, height:36, borderRadius:"50%", background:m.gender==="F"?"#FFF0F3":C.goldFaint, border:`2px solid ${m.gender==="F"?C.primaryLight:C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"1.1rem", flexShrink:0 }}>
-              {m.gender==="F"?"👩":"👨"}
-            </div>
-            <div style={{ flex:1, minWidth:0 }}>
+      <div style={{ fontSize:"0.6rem", color:C.textMuted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:20, fontFamily:mono }}>⬆️ Oldest → Youngest ⬇️</div>
+      {chain.map((m,i) => (
+        <div key={m.id||i} style={{ display:"flex", flexDirection:"column", alignItems:"center", width:"100%", maxWidth:320 }}>
+          <div onClick={()=>onSelect(m.id)} style={{ width:"100%", padding:"12px 16px", background:m.type==="you"?C.goldFaint:m.type==="anc"?"#FFFAF5":C.white, border:`2px solid ${selId===m.id?C.primary:m.type==="you"?C.gold:C.border}`, borderLeft:`4px solid ${m.type==="you"?C.gold:m.type==="anc"?C.primaryLight:C.primary}`, borderRadius:10, cursor:"pointer", display:"flex", alignItems:"center", gap:12 }}>
+            <div style={{ width:36, height:36, borderRadius:"50%", background:m.gender==="F"?"#FFF0F3":C.goldFaint, border:`2px solid ${m.gender==="F"?C.primaryLight:C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"1.1rem", flexShrink:0 }}>{m.gender==="F"?"👩":"👨"}</div>
+            <div style={{ flex:1 }}>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 {m.type==="you" && <span style={{ fontSize:"0.5rem", background:C.gold, color:"#fff", padding:"1px 6px", borderRadius:3, fontWeight:700, fontFamily:mono }}>YOU</span>}
                 <span style={{ fontSize:"0.92rem", fontWeight:m.type==="you"?700:500, color:C.primaryDark, fontFamily:serif }}>{m.name}</span>
                 {m.rip && <span>🪔</span>}
               </div>
-              <div style={{ fontSize:"0.62rem", color:C.textMuted, fontFamily:mono, marginTop:2 }}>
-                {m.relation && <span style={{ marginRight:8 }}>{m.relation}</span>}
-                {m.year     && <span>b. {m.year}</span>}
-              </div>
+              <div style={{ fontSize:"0.62rem", color:C.textMuted, fontFamily:mono, marginTop:2 }}>{m.year&&`b. ${m.year}`}</div>
             </div>
-            {/* Spouse badge */}
-            {treeData.spouses?.["self"] && m.type==="you" && (
-              <div style={{ fontSize:"0.6rem", color:C.primaryLight, fontFamily:mono }}>
-                ♥ {treeData.spouses["self"].name}
-              </div>
-            )}
           </div>
           {i < chain.length-1 && (
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"4px 0" }}>
-              <div style={{ width:2, height:20, background:`linear-gradient(${C.gold},${C.primaryLight})`, borderRadius:2 }} />
-              <div style={{ fontSize:"0.55rem", color:C.textMuted, fontFamily:mono }}>│</div>
-            </div>
+            <div style={{ width:2, height:24, background:`linear-gradient(${C.gold},${C.primaryLight})`, borderRadius:2, margin:"2px 0" }} />
           )}
         </div>
       ))}
@@ -501,257 +516,25 @@ function VerticalView({ treeData, onSelect, selId }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VIEW: ORG CHART — proper connected tree, couples in one chip
-// Each level: members connected by horizontal line, vertical drop from parent
-// Matches the image: hargovina at top, children below on one horizontal line
-// ─────────────────────────────────────────────────────────────────────────────
-function OrgChartView({ treeData, onSelect, selId }) {
-  // Build a proper tree structure for the org chart
-  // ancestors stack (oldest first), self + siblings at self's level, descendants below
-  const ancs     = [...(treeData.ancestors||[])].filter(a=>a?.name).reverse(); // oldest→newest
-  const descs    = (treeData.descendants||[]).filter(d=>d?.name);
-  const siblings = Object.values(treeData.siblings||{})
-    .flatMap(s=>[...(s.elder||[]),...(s.younger||[])]).filter(x=>x?.name);
-  const spouses  = treeData.spouses || {};
-
-  // Each "level" = one horizontal row
-  // ancestors: one node per level (main line)
-  // self level: self + siblings all on same row
-  // descendants: all on same row below self
-  const levels = [
-    ...ancs.map((a, i) => ({
-      key:     "anc_"+i,
-      nodes:   [{ member:a, spouse: spouses["anc_"+a.relation]||null, isMain:true }],
-      label:   a.relation,
-      isAnc:   true,
-    })),
-    {
-      key:   "self",
-      nodes: [
-        ...siblings.filter((_,i)=>i<siblings.length/2).map((s,i)=>({ member:s, spouse:null, isMain:false, isSib:true })),
-        { member:treeData.self, spouse:spouses["self"]||null, isMain:true, isYou:true },
-        ...siblings.filter((_,i)=>i>=siblings.length/2).map((s,i)=>({ member:s, spouse:null, isMain:false, isSib:true })),
-      ],
-      label: "Your Generation",
-      isSelf: true,
-    },
-    ...(descs.length > 0 ? [{
-      key:   "descs",
-      nodes: descs.map((d,i)=>({ member:d, spouse:spouses["desc_"+d.relation]||null, isMain:false, isChild:true })),
-      label: "Children",
-      isDesc: true,
-    }] : []),
-  ];
-
-  return (
-    <div style={{ overflowX:"auto", overflowY:"visible", padding:"24px 0 40px", minWidth:"100%", background:C.bg }}>
-      <div style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", minWidth:"100%", paddingBottom:8 }}>
-
-        {levels.map((level, li) => {
-          const isLast   = li === levels.length - 1;
-          const nextLevel= levels[li+1];
-          const hasMulti = level.nodes.length > 1;
-          const mainIdx  = level.nodes.findIndex(n=>n.isMain||n.isYou);
-
-          return (
-            <div key={level.key} style={{ display:"flex", flexDirection:"column", alignItems:"center", width:"100%" }}>
-
-              {/* ── vertical drop from above ── */}
-              {li > 0 && (
-                <div style={{ width:2, height:24, background:`linear-gradient(${C.gold},${C.gold})`, flexShrink:0 }} />
-              )}
-
-              {/* ── level label ── */}
-              <div style={{ fontSize:"0.5rem", color:C.textMuted, fontFamily:mono, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:6, opacity:0.8 }}>
-                {level.label}
-              </div>
-
-              {/* ── nodes row with connecting horizontal line ── */}
-              <div style={{ position:"relative", display:"flex", alignItems:"flex-start", justifyContent:"center", gap:0, padding:"0 20px", width:"100%" }}>
-
-                {/* Horizontal line spanning all sibling nodes */}
-                {hasMulti && (
-                  <div style={{
-                    position:"absolute",
-                    top: 22, // halfway up chip
-                    left:"50%", right:"50%",
-                    // We use a pseudo approach — full width line clipped by flex row
-                    width:"calc(100% - 80px)",
-                    transform:"translateX(-50%)",
-                    height:2,
-                    background: level.isSelf ? C.primary : C.gold,
-                    zIndex:0,
-                    borderRadius:2,
-                  }} />
-                )}
-
-                {level.nodes.map((n, ni) => (
-                  <div key={ni} style={{ display:"flex", flexDirection:"column", alignItems:"center", flex:1, maxWidth:130, position:"relative", zIndex:1 }}>
-                    {/* vertical tick down from horizontal line for each sibling */}
-                    {hasMulti && ni !== mainIdx && (
-                      <div style={{ width:2, height:12, background:level.isSelf?C.primary:C.gold, margin:"0 auto" }} />
-                    )}
-                    {hasMulti && ni === mainIdx && (
-                      <div style={{ width:2, height:12, background:C.gold, margin:"0 auto" }} />
-                    )}
-
-                    {/* ── Couple chip ── */}
-                    <CoupleChip
-                      member={n.member}
-                      spouse={n.spouse}
-                      isYou={n.isYou}
-                      isSib={n.isSib}
-                      isSelected={selId===level.key+"_"+ni}
-                      onClick={()=>onSelect(level.key+"_"+ni, n.member)}
-                    />
-
-                    {/* vertical drop to next level — only from main/YOU node */}
-                    {!isLast && (n.isMain||n.isYou) && (
-                      <div style={{ width:2, height:20, background:C.gold, margin:"4px auto 0" }} />
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* ── horizontal spread line above children ── */}
-              {!isLast && nextLevel && nextLevel.nodes.length > 1 && (
-                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", width:"100%" }}>
-                  <div style={{ width:"calc(100% - 80px)", height:2, background:C.gold, borderRadius:2 }} />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Couple chip: person + spouse side by side in one rounded card ─────────────
-function CoupleChip({ member, spouse, isYou, isSib, isSelected, onClick }) {
-  const hasSpouse = spouse?.name;
-
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display:       "flex",
-        alignItems:    "center",
-        background:    isYou ? C.goldFaint : isSib ? "#FFFAF5" : C.white,
-        border:        `2px solid ${isSelected ? C.primary : isYou ? C.gold : C.border}`,
-        borderRadius:  20,
-        padding:       hasSpouse ? "6px 10px 6px 6px" : "6px 10px",
-        cursor:        "pointer",
-        boxShadow:     isSelected
-                         ? `0 4px 16px ${C.primary}30`
-                         : "0 1px 6px rgba(0,0,0,0.06)",
-        transition:    "all 0.15s",
-        gap:           hasSpouse ? 0 : 6,
-        maxWidth:      hasSpouse ? 200 : 130,
-        minWidth:      80,
-        position:      "relative",
-      }}
-    >
-      {/* Main person */}
-      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"0 6px" }}>
-        <span style={{ fontSize:"1.1rem" }}>{member.gender==="F"?"👩":"👨"}</span>
-        <span style={{
-          fontSize:   "0.68rem",
-          fontFamily: serif,
-          fontWeight: isYou ? 700 : 500,
-          color:      isYou ? C.primaryDark : isSib ? C.textSecondary : C.primaryDark,
-          fontStyle:  isSib ? "italic" : "normal",
-          whiteSpace: "nowrap",
-          marginTop:  2,
-          maxWidth:   80,
-          overflow:   "hidden",
-          textOverflow:"ellipsis",
-        }}>
-          {member.name}
-        </span>
-        {member.year && (
-          <span style={{ fontSize:"0.5rem", color:C.textMuted, fontFamily:mono }}>
-            b.{member.year}
-          </span>
-        )}
-        {member.rip && <span style={{ fontSize:"0.65rem" }}>🪔</span>}
-        {isYou && (
-          <span style={{ fontSize:"0.42rem", background:C.gold, color:"#fff", padding:"1px 5px", borderRadius:3, fontWeight:700, fontFamily:mono, marginTop:2 }}>
-            YOU
-          </span>
-        )}
-      </div>
-
-      {/* Divider + spouse */}
-      {hasSpouse && (
-        <>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"0 4px" }}>
-            <div style={{ height:36, width:1, background:`linear-gradient(transparent,${C.primaryLight},transparent)` }} />
-            <span style={{ fontSize:"0.6rem", color:C.primaryLight, marginTop:-2 }}>♥</span>
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"0 6px" }}>
-            <span style={{ fontSize:"1.1rem" }}>{spouse.gender==="F"?"👩":"👨"}</span>
-            <span style={{
-              fontSize:"0.68rem", fontFamily:serif, fontWeight:500,
-              color:C.primaryLight, whiteSpace:"nowrap",
-              marginTop:2, maxWidth:80, overflow:"hidden", textOverflow:"ellipsis",
-            }}>
-              {spouse.name}
-            </span>
-            {spouse.year && (
-              <span style={{ fontSize:"0.5rem", color:C.textMuted, fontFamily:mono }}>
-                b.{spouse.year}
-              </span>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VIEW: LIVING MEMBERS
-// ─────────────────────────────────────────────────────────────────────────────
-function LivingView({ livingMembers, treeData, onSelect, selId }) {
+function LivingView({ livingMembers, onSelect, selId }) {
   const currentYear = new Date().getFullYear();
   return (
     <div style={{ padding:"16px 14px" }}>
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:C.green, boxShadow:`0 0 6px ${C.green}` }} />
-        <span style={{ fontSize:"0.7rem", color:C.green, fontFamily:mono, fontWeight:700 }}>
-          {livingMembers.length} Living Members
-        </span>
+        <span style={{ fontSize:"0.7rem", color:C.green, fontFamily:mono, fontWeight:700 }}>{livingMembers.length} Living Members</span>
       </div>
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         {livingMembers.map((m,i) => {
           const age = m.year ? currentYear - parseInt(m.year) : null;
           return (
-            <div key={i} onClick={()=>onSelect("live_"+i,m)}
-              style={{
-                display:"flex", alignItems:"center", gap:12, padding:"10px 14px",
-                background:selId==="live_"+i?C.goldFaint:C.white,
-                border:`1.5px solid ${selId==="live_"+i?C.primary:C.border}`,
-                borderLeft:`4px solid ${C.green}`,
-                borderRadius:10, cursor:"pointer", transition:"all 0.15s",
-              }}>
-              <div style={{ width:38, height:38, borderRadius:"50%", background:m.gender==="F"?"#FFF0F3":C.goldFaint, border:`2px solid ${m.gender==="F"?C.primaryLight:C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"1.2rem", flexShrink:0 }}>
-                {m.gender==="F"?"👩":"👨"}
-              </div>
+            <div key={m.id||i} onClick={()=>onSelect(m.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", background:selId===m.id?C.goldFaint:C.white, border:`1.5px solid ${selId===m.id?C.primary:C.border}`, borderLeft:`4px solid ${C.green}`, borderRadius:10, cursor:"pointer" }}>
+              <div style={{ width:38, height:38, borderRadius:"50%", background:m.gender==="F"?"#FFF0F3":C.goldFaint, border:`2px solid ${m.gender==="F"?C.primaryLight:C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"1.2rem", flexShrink:0 }}>{m.gender==="F"?"👩":"👨"}</div>
               <div style={{ flex:1 }}>
                 <div style={{ fontSize:"0.88rem", fontWeight:600, color:C.primaryDark, fontFamily:serif }}>{m.name}</div>
-                <div style={{ fontSize:"0.6rem", color:C.textMuted, fontFamily:mono, marginTop:2 }}>
-                  {m.relation && <span style={{ marginRight:8 }}>🔗 {m.relation}</span>}
-                  {m.year     && <span>b. {m.year}</span>}
-                </div>
+                {m.year && <div style={{ fontSize:"0.6rem", color:C.textMuted, fontFamily:mono, marginTop:2 }}>b. {m.year}</div>}
               </div>
-              {age && (
-                <div style={{ textAlign:"center" }}>
-                  <div style={{ fontSize:"1.1rem", fontFamily:serif, fontWeight:700, color:C.primary }}>{age}</div>
-                  <div style={{ fontSize:"0.48rem", color:C.textMuted, fontFamily:mono, textTransform:"uppercase" }}>yrs</div>
-                </div>
-              )}
+              {age && <div style={{ textAlign:"center" }}><div style={{ fontSize:"1.1rem", fontFamily:serif, fontWeight:700, color:C.primary }}>{age}</div><div style={{ fontSize:"0.48rem", color:C.textMuted, fontFamily:mono, textTransform:"uppercase" }}>yrs</div></div>}
               <div style={{ width:8, height:8, borderRadius:"50%", background:C.green, boxShadow:`0 0 4px ${C.green}`, flexShrink:0 }} />
             </div>
           );
@@ -761,113 +544,57 @@ function LivingView({ livingMembers, treeData, onSelect, selId }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VIEW: TABLE
-// ─────────────────────────────────────────────────────────────────────────────
 function TableView({ rows, search, onSearch, sortByGen, onToggleSort, onSelect, selId }) {
   return (
     <div style={{ padding:"14px" }}>
-      {/* Search + Sort */}
       <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-        <input
-          value={search} onChange={e=>onSearch(e.target.value)}
-          placeholder="🔍 નામ શોધો..."
-          style={{ flex:1, padding:"8px 12px", border:`1.5px solid ${C.border}`, borderRadius:8, fontSize:14, fontFamily:mono, outline:"none", background:C.white, color:C.textPrimary }}
-        />
-        <button onClick={onToggleSort}
-          style={{ padding:"8px 12px", background:C.goldFaint, border:`1.5px solid ${C.gold}40`, borderRadius:8, fontSize:"0.68rem", fontFamily:mono, color:C.primary, cursor:"pointer", whiteSpace:"nowrap" }}>
-          {sortByGen?"Gen ↑":"A-Z ↑"}
-        </button>
+        <input value={search} onChange={e=>onSearch(e.target.value)} placeholder="🔍 Search..." style={{ flex:1, padding:"8px 12px", border:`1.5px solid ${C.border}`, borderRadius:8, fontSize:14, fontFamily:mono, outline:"none" }} />
+        <button onClick={onToggleSort} style={{ padding:"8px 12px", background:C.goldFaint, border:`1.5px solid ${C.gold}40`, borderRadius:8, fontSize:"0.68rem", fontFamily:mono, color:C.primary, cursor:"pointer" }}>{sortByGen?"Gen ↑":"A-Z ↑"}</button>
       </div>
-
-      {/* Table header */}
-      <div style={{ display:"grid", gridTemplateColumns:"50px 1fr 80px 60px 70px", gap:0, background:C.primaryDark, borderRadius:"8px 8px 0 0", overflow:"hidden" }}>
-        {["Gen","Name","Relation","Year","Status"].map((h,i)=>(
-          <div key={i} style={{ padding:"8px 10px", fontSize:"0.58rem", color:C.goldLight, fontFamily:mono, letterSpacing:"0.08em", textTransform:"uppercase", borderRight:i<4?`1px solid rgba(240,208,128,0.15)`:"none" }}>
-            {h}
-          </div>
+      <div style={{ display:"grid", gridTemplateColumns:"50px 1fr 60px 70px", background:C.primaryDark, borderRadius:"8px 8px 0 0", overflow:"hidden" }}>
+        {["Gen","Name","Year","Status"].map((h,i)=>(
+          <div key={i} style={{ padding:"8px 10px", fontSize:"0.58rem", color:C.goldLight, fontFamily:mono, letterSpacing:"0.08em", textTransform:"uppercase", borderRight:i<3?`1px solid rgba(240,208,128,0.15)`:"none" }}>{h}</div>
         ))}
       </div>
-
-      {/* Table rows */}
       {rows.map((r,i)=>(
-        <div key={i} onClick={()=>onSelect("tbl_"+i,r)}
-          style={{ display:"grid", gridTemplateColumns:"50px 1fr 80px 60px 70px", background:selId==="tbl_"+i?C.goldFaint:i%2===0?C.white:"#FDFAF5", borderBottom:`1px solid ${C.border}`, cursor:"pointer", transition:"background 0.1s", borderLeft:`3px solid ${r.type==="you"?C.gold:r.type==="anc"?C.primaryLight:C.primary}` }}>
-          <div style={{ padding:"8px 10px", fontSize:"0.65rem", fontFamily:mono, color:C.primary, fontWeight:700, borderRight:`1px solid ${C.border}`, display:"flex", alignItems:"center" }}>
-            {r.genLabel}
-          </div>
+        <div key={r.id||i} onClick={()=>onSelect(r.id)} style={{ display:"grid", gridTemplateColumns:"50px 1fr 60px 70px", background:selId===r.id?C.goldFaint:i%2===0?C.white:"#FDFAF5", borderBottom:`1px solid ${C.border}`, cursor:"pointer", borderLeft:`3px solid ${r.role==="Self"?C.gold:r.role==="Ancestor"?C.primaryLight:r.role?.startsWith("Spouse")?"#9B2335":r.role==="Sibling"?"#C9A84C80":C.primary}` }}>
+          <div style={{ padding:"8px 10px", fontSize:"0.65rem", fontFamily:mono, color:C.primary, fontWeight:700, borderRight:`1px solid ${C.border}`, display:"flex", alignItems:"center" }}>{r.genLabel}</div>
           <div style={{ padding:"8px 10px", borderRight:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:6 }}>
             <span style={{ fontSize:"0.85rem" }}>{r.gender==="F"?"👩":"👨"}</span>
-            <div>
-              <div style={{ fontSize:"0.82rem", fontWeight:r.type==="you"?700:500, color:C.primaryDark, fontFamily:serif }}>{r.name}</div>
-              {r.type==="you" && <span style={{ fontSize:"0.45rem", background:C.gold, color:"#fff", padding:"1px 5px", borderRadius:3, fontFamily:mono }}>YOU</span>}
-            </div>
+            <span style={{ fontSize:"0.82rem", fontWeight:r.role==="Self"?700:500, color:C.primaryDark, fontFamily:serif }}>{r.name}</span>
+            {r.role && r.role !== "Self" && r.role !== "Ancestor" && r.role !== "Child" && (
+              <span style={{ fontSize:"0.48rem", padding:"1px 5px", borderRadius:3,
+                background:"rgba(123,28,46,0.07)", color:C.textSecondary,
+                fontFamily:mono, flexShrink:0, whiteSpace:"nowrap",
+                maxWidth:80, overflow:"hidden", textOverflow:"ellipsis" }}>
+                {r.role}
+              </span>
+            )}
           </div>
-          <div style={{ padding:"8px 10px", fontSize:"0.62rem", color:C.textSecondary, fontFamily:mono, borderRight:`1px solid ${C.border}`, display:"flex", alignItems:"center" }}>
-            {r.relation||"—"}
-          </div>
-          <div style={{ padding:"8px 10px", fontSize:"0.62rem", color:C.textMuted, fontFamily:mono, borderRight:`1px solid ${C.border}`, display:"flex", alignItems:"center" }}>
-            {r.year||"—"}
-          </div>
+          <div style={{ padding:"8px 10px", fontSize:"0.62rem", color:C.textMuted, fontFamily:mono, borderRight:`1px solid ${C.border}`, display:"flex", alignItems:"center" }}>{r.year||"—"}</div>
           <div style={{ padding:"8px 10px", display:"flex", alignItems:"center" }}>
-            {r.rip
-              ? <span style={{ fontSize:"0.7rem" }}>🪔 Deceased</span>
-              : <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:"0.62rem", color:C.green, fontFamily:mono }}><span style={{ width:6, height:6, borderRadius:"50%", background:C.green, display:"inline-block" }}/>Living</span>
-            }
+            {r.rip ? <span style={{ fontSize:"0.7rem" }}>🪔</span> : <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:"0.62rem", color:C.green }}><span style={{ width:6, height:6, borderRadius:"50%", background:C.green, display:"inline-block" }}/>Living</span>}
           </div>
         </div>
       ))}
-
-      {rows.length===0 && (
-        <div style={{ textAlign:"center", padding:24, color:C.textMuted, fontSize:"0.78rem", fontFamily:mono }}>
-          કોઈ result મળ્યું નથી
-        </div>
-      )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VIEW: CARDS
-// ─────────────────────────────────────────────────────────────────────────────
-function CardsView({ allMembers, treeData, onSelect, selId }) {
+function CardsView({ allMembers, selfId, onSelect, selId }) {
   return (
     <div style={{ padding:"16px 14px" }}>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))", gap:12 }}>
-        {allMembers.map((m,i)=>{
-          const isYou = m.name===treeData.self?.name;
+        {allMembers.map(m => {
+          const isYou = m.id === selfId;
           const age   = m.year ? new Date().getFullYear()-parseInt(m.year) : null;
           return (
-            <div key={i} onClick={()=>onSelect("card_"+i,m)}
-              style={{
-                background:isYou?C.goldFaint:m.rip?"#FAFAFA":C.white,
-                border:`2px solid ${selId==="card_"+i?C.primary:isYou?C.gold:C.border}`,
-                borderRadius:14, padding:"16px 12px", cursor:"pointer", textAlign:"center",
-                boxShadow:selId==="card_"+i?`0 4px 20px ${C.primary}25`:"0 2px 8px rgba(0,0,0,0.04)",
-                transition:"all 0.15s", opacity:m.rip?0.7:1,
-                position:"relative",
-              }}>
-              {isYou && (
-                <div style={{ position:"absolute", top:8, right:8, fontSize:"0.45rem", background:C.gold, color:"#fff", padding:"1px 5px", borderRadius:3, fontWeight:700, fontFamily:mono }}>YOU</div>
-              )}
+            <div key={m.id} onClick={()=>onSelect(m.id)} style={{ background:isYou?C.goldFaint:m.rip?"#FAFAFA":C.white, border:`2px solid ${selId===m.id?C.primary:isYou?C.gold:C.border}`, borderRadius:14, padding:"16px 12px", cursor:"pointer", textAlign:"center", position:"relative", opacity:m.rip?0.7:1 }}>
+              {isYou && <div style={{ position:"absolute", top:8, right:8, fontSize:"0.45rem", background:C.gold, color:"#fff", padding:"1px 5px", borderRadius:3, fontWeight:700, fontFamily:mono }}>YOU</div>}
               <div style={{ fontSize:"2rem", marginBottom:8 }}>{m.gender==="F"?"👩":"👨"}</div>
-              <div style={{ fontSize:"0.82rem", fontWeight:isYou?700:600, color:C.primaryDark, fontFamily:serif, lineHeight:1.3, marginBottom:4 }}>
-                {m.name}
-              </div>
-              {m.relation && (
-                <div style={{ fontSize:"0.55rem", color:C.textMuted, fontFamily:mono, marginBottom:4 }}>
-                  {m.relation}
-                </div>
-              )}
-              {age && (
-                <div style={{ display:"inline-block", background:isYou?C.white:C.goldFaint, border:`1px solid ${C.gold}40`, borderRadius:10, padding:"2px 8px", fontSize:"0.65rem", color:C.primary, fontFamily:mono }}>
-                  {age} yrs
-                </div>
-              )}
+              <div style={{ fontSize:"0.82rem", fontWeight:isYou?700:600, color:C.primaryDark, fontFamily:serif, marginBottom:4 }}>{m.name}</div>
+              {age && <div style={{ display:"inline-block", background:isYou?C.white:C.goldFaint, border:`1px solid ${C.gold}40`, borderRadius:10, padding:"2px 8px", fontSize:"0.65rem", color:C.primary, fontFamily:mono }}>{age} yrs</div>}
               {m.rip && <div style={{ marginTop:6, fontSize:"0.85rem" }}>🪔</div>}
-              {!m.rip && !m.rip && m.year && (
-                <div style={{ position:"absolute", bottom:8, right:8, width:7, height:7, borderRadius:"50%", background:C.green, boxShadow:`0 0 4px ${C.green}` }} />
-              )}
             </div>
           );
         })}
@@ -876,315 +603,55 @@ function CardsView({ allMembers, treeData, onSelect, selId }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VIEW: LINEAGE TABLE — merged cells, Excel style
-// Columns: Sr | Descendant/Child | Self/Parent | Father(anc_0) | Grandfather(anc_1) | ...
-//
-// Row layout (matching screenshot):
-//  Sr | Descendant | Self/Parent     | anc_0       | anc_1      | anc_2
-//  1  | Dhruv      | Sanjay (merged) | Gunvantbhai | Laxmichand | Hargovind
-//  2  | Hetavi     | ↑               | (merged)    | (merged)   | (merged)
-//  3  | —          | Nikesh          | ↑           | ↑          | ↑
-//  4  | —          | Parul           | ↑           | ↑          | ↑
-//  5  | —          | —               | Shantilal   | ↑          | ↑
-//  6  | —          | —               | Harilala    | ↑          | ↑
-//
-// ancestors array = [father, grandfather, great-gf, ...]  (index 0 = father)
-// ─────────────────────────────────────────────────────────────────────────────
-function LineageView({ treeData }) {
-  const spouses  = treeData.spouses  || {};
-  const siblings = treeData.siblings || {};
-  console.log("🌳 FIRESTORE TREE DATA:", JSON.stringify(treeData, null, 2));
-
-  const ancestors = (treeData.ancestors||[]).filter(a=>a?.name);
-  const descs     = (treeData.descendants||[]).filter(d=>d?.name);
-
-  const ancSpouse  = (i) => { const s=spouses["anc_"+i]; return s?.name?s:null; };
-  const selfSpouse = spouses["self"]?.name ? spouses["self"] : null;
-  const descSpouse = (i) => { const s=spouses["desc_"+i]; return s?.name?s:null; };
-
-  // ── Build flat row list ───────────────────────────────────────────────────
-  // Each row: { desc, self, ancs[] }
-  // desc  = { name, gender, spouse? } | null
-  // self  = { name, gender, spouse?, isYou? } | null
-  // ancs  = array of length ancestors.length, each { name, gender, spouse? } | null
-
-  const rows = [];
-
-  // Descendants + their siblings
-  descs.forEach((d, di) => {
-    const dSp = descSpouse(di);
-    // Desc row: desc=d, self=YOU, ancs=[anc_0, anc_1, ...]
-    rows.push({
-      desc: { name:d.name, gender:d.gender, spouse:dSp },
-      self: { name:treeData.self?.name, gender:treeData.self?.gender, spouse:selfSpouse, isYou:true },
-      ancs: ancestors.map((_,i) => { const sp=ancSpouse(i); return { name:ancestors[i].name, gender:ancestors[i].gender, spouse:sp }; }),
-    });
-    // Siblings of this desc → appear in Descendant col, same self+ancs as desc row
-    [...(siblings["desc_"+di]?.elder||[]),...(siblings["desc_"+di]?.younger||[])]
-      .filter(s=>s?.name)
-      .forEach(sib => {
-        rows.push({
-          desc: { name:sib.name, gender:sib.gender, spouse:null },
-          self: { name:treeData.self?.name, gender:treeData.self?.gender, spouse:selfSpouse, isYou:true },
-          ancs: ancestors.map((_,i) => { const sp=ancSpouse(i); return { name:ancestors[i].name, gender:ancestors[i].gender, spouse:sp }; }),
-        });
-      });
-  });
-
-  // No descendants — show YOU
-  if (descs.length === 0) {
-    rows.push({
-      desc: null,
-      self: { name:treeData.self?.name, gender:treeData.self?.gender, spouse:selfSpouse, isYou:true },
-      ancs: ancestors.map((_,i) => { const sp=ancSpouse(i); return { name:ancestors[i].name, gender:ancestors[i].gender, spouse:sp }; }),
-    });
-  }
-
-  // Siblings of YOU
-  [...(siblings["self"]?.elder||[]),...(siblings["self"]?.younger||[])]
-    .filter(s=>s?.name)
-    .forEach(sib => {
-      rows.push({
-        desc: null,
-        self: { name:sib.name, gender:sib.gender, spouse:null },
-        ancs: ancestors.map((_,i) => { const sp=ancSpouse(i); return { name:ancestors[i].name, gender:ancestors[i].gender, spouse:sp }; }),
-      });
-    });
-
-  // Siblings of ancestors[ancIdx]
-  // From the data: siblings["anc_1"] = Shantilal, Harilala (siblings of Laxmichand)
-  // Excel shows them in Father col (anc_0 column) — one column LEFT of Laxmichand
-  // Rule: sibling of anc_i → displayed in column (i-1), parent = anc_(i+1)
-  // Special case: sibling of anc_0 (father) → goes in "Self/Parent" column (self=sib, ancs same)
-  ancestors.forEach((anc, ancIdx) => {
-    [...(siblings["anc_"+ancIdx]?.elder||[]),...(siblings["anc_"+ancIdx]?.younger||[])]
-      .filter(s=>s?.name)
-      .forEach(sib => {
-        if (ancIdx === 0) {
-          // Sibling of father → goes in Self/Parent column, same ancs as YOU
-          rows.push({
-            desc: null,
-            self: { name:sib.name, gender:sib.gender, spouse:null },
-            ancs: ancestors.map((_,i) => {
-              const sp = ancSpouse(i);
-              return { name:ancestors[i].name, gender:ancestors[i].gender, spouse:sp };
-            }),
-          });
-        } else {
-          // Sibling of anc_i → goes in column (i-1), cols 0..i-2 = null, col i-1 = sib, cols i+ = ancestors
-          rows.push({
-            desc: null,
-            self: null,
-            ancs: ancestors.map((_,i) => {
-              if (i < ancIdx - 1)  return null;
-              if (i === ancIdx - 1) return { name:sib.name, gender:sib.gender, spouse:null, isSib:true };
-              const sp = ancSpouse(i);
-              return { name:ancestors[i].name, gender:ancestors[i].gender, spouse:sp };
-            }),
-          });
-        }
-      });
-  });
-
-  // ── Compute rowSpan for each column ──────────────────────────────────────
-  // For a given column accessor fn, compute how many consecutive rows share same name
-  const spanMap = {}; // key: "col_ri" → span count (1 = no merge, 0 = skip/merged)
-
-  const computeSpans = (colKey, getName) => {
-    let ri = 0;
-    while (ri < rows.length) {
-      const name = getName(rows[ri]);
-      if (!name) { spanMap[colKey+"_"+ri] = 1; ri++; continue; }
-      let span = 1;
-      while (ri+span < rows.length && getName(rows[ri+span]) === name) span++;
-      spanMap[colKey+"_"+ri] = span;
-      for (let k=1;k<span;k++) spanMap[colKey+"_"+(ri+k)] = 0; // 0 = skip
-      ri += span;
-    }
-  };
-
-  computeSpans("self", r => r.self?.name || null);
-  ancestors.forEach((_, i) => computeSpans("anc"+i, r => r.ancs[i]?.name || null));
-
-  // ── Cell renderer ─────────────────────────────────────────────────────────
-  const Cell = ({ data, isYou }) => {
-    if (!data?.name) return <span style={{color:"#C0A0A0",fontSize:"0.75rem"}}>—</span>;
-    return (
-      <div style={{display:"flex",flexDirection:"column",gap:2}}>
-        <div style={{display:"flex",alignItems:"center",gap:5}}>
-          <span style={{fontSize:"0.82rem"}}>{data.gender==="F"?"👩":"👨"}</span>
-          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:isYou?700:600,color:isYou?"#5A1020":"#7B1C2E",fontSize:"0.8rem"}}>
-            {data.name}
-          </span>
-          {isYou && <span style={{fontSize:"0.42rem",background:"#C9A84C",color:"#fff",padding:"1px 5px",borderRadius:3,fontWeight:700,fontFamily:"monospace"}}>YOU</span>}
-        </div>
-        {data.spouse?.name && <>
-          <div style={{height:1,background:"#f0d0d0",margin:"1px 4px"}}/>
-          <div style={{display:"flex",alignItems:"center",gap:5}}>
-            <span style={{fontSize:"0.72rem"}}>{data.spouse.gender==="F"?"👩":"👨"}</span>
-            <span style={{fontFamily:"'Playfair Display',serif",fontStyle:"italic",color:"#9B2335",fontSize:"0.72rem"}}>{data.spouse.name}</span>
-          </div>
-        </>}
-      </div>
-    );
-  };
-
-  const TH = ({children}) => (
-    <th style={{padding:"8px 12px",background:"#5A1020",color:"#F0D080",fontSize:"0.58rem",fontFamily:"monospace",fontWeight:700,letterSpacing:"0.08em",textAlign:"left",borderRight:"1px solid rgba(240,208,128,0.15)",borderBottom:"2px solid #C9A84C",whiteSpace:"nowrap"}}>
-      {children}
-    </th>
-  );
-
-  const ancHeaders = ["Father\n(anc_0 / Brother)","Grandfather\n(anc_1)","Great-GF\n(anc_2)","Great²-GF","Great³-GF"];
-
-  return (
-    <div style={{overflowX:"auto",padding:"16px 0 40px"}}>
-      <div style={{padding:"0 14px 10px",fontSize:"0.6rem",color:"#C0A0A0",fontFamily:"monospace"}}>
-        📜 Lineage Table · cells merge vertically when value repeats
-      </div>
-      <table style={{borderCollapse:"collapse",fontFamily:"monospace",fontSize:"0.75rem",background:"#fff",minWidth:"max-content"}}>
-        <thead>
-          <tr>
-            <TH>Sr. No.</TH>
-            <TH>Descendant{"\n"}/ Child</TH>
-            <TH>Self /{"\n"}Parent</TH>
-            {ancestors.map((_,i) => <TH key={i}>{ancHeaders[i]||`Anc ${i}`}</TH>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, ri) => {
-            const selfSpanVal = spanMap["self_"+ri];
-            return (
-              <tr key={ri} style={{background:ri%2===0?"#fff":"#FDFAF5"}}>
-                {/* Sr No */}
-                <td style={{padding:"8px 10px",borderRight:"1px solid #f0e6e6",borderBottom:"1px solid #f0e6e6",color:"#C0A0A0",textAlign:"center",fontSize:"0.65rem",minWidth:36}}>
-                  {ri+1}
-                </td>
-                {/* Descendant */}
-                <td style={{padding:"8px 10px",borderRight:"1px solid #f0e6e6",borderBottom:"1px solid #f0e6e6",minWidth:100,verticalAlign:"middle"}}>
-                  <Cell data={row.desc} />
-                </td>
-                {/* Self/Parent — merged */}
-                {selfSpanVal > 0 && (
-                  <td rowSpan={selfSpanVal} style={{padding:"8px 10px",borderRight:"1px solid #f0e6e6",borderBottom:"1px solid #f0e6e6",minWidth:110,verticalAlign:"middle",background:row.self?.isYou?"#FDF6EC":"inherit"}}>
-                    <Cell data={row.self} isYou={row.self?.isYou} />
-                  </td>
-                )}
-                {/* Ancestor columns — merged */}
-                {ancestors.map((_,i) => {
-                  const spanVal = spanMap["anc"+i+"_"+ri];
-                  if (spanVal === 0) return null;
-                  return (
-                    <td key={i} rowSpan={spanVal} style={{padding:"8px 10px",borderRight:"1px solid #f0e6e6",borderBottom:"1px solid #f0e6e6",minWidth:130,verticalAlign:"middle"}}>
-                      <Cell data={row.ancs[i]} />
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// NODE DETAIL PANEL
-// ─────────────────────────────────────────────────────────────────────────────
-function NodePanel({ node, onClose, onEdit }) {
-  const age = node.year ? new Date().getFullYear()-parseInt(node.year) : null;
+function NodePanel({ member, selfId, onClose, onEdit }) {
+  const age = member.year ? new Date().getFullYear()-parseInt(member.year) : null;
   return (
     <div style={{ position:"fixed", bottom:0, left:0, right:0, background:C.white, borderTop:`2px solid ${C.gold}`, borderRadius:"16px 16px 0 0", padding:"16px 20px 32px", boxShadow:`0 -8px 32px rgba(90,16,32,0.12)`, animation:"fadeUp 0.22s ease", zIndex:100 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          <div style={{ width:44, height:44, borderRadius:"50%", background:node.gender==="F"?"#FFF0F3":C.goldFaint, border:`2px solid ${node.gender==="F"?C.primaryLight:C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"1.3rem" }}>
-            {node.type==="spouse"?"♥":node.gender==="F"?"👩":"👨"}
+          <div style={{ width:44, height:44, borderRadius:"50%", background:member.gender==="F"?"#FFF0F3":C.goldFaint, border:`2px solid ${member.gender==="F"?C.primaryLight:C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"1.3rem" }}>
+            {member.gender==="F"?"👩":"👨"}
           </div>
           <div>
-            <div style={{ fontFamily:serif, fontSize:"1.1rem", color:C.primaryDark, fontWeight:700 }}>
-              {node.name} {node.rip&&"🪔"}
-            </div>
+            <div style={{ fontFamily:serif, fontSize:"1.1rem", color:C.primaryDark, fontWeight:700 }}>{member.name} {member.rip&&"🪔"}</div>
             <div style={{ fontSize:"0.62rem", color:C.textMuted, fontFamily:mono, marginTop:2 }}>
-              {node.relation&&<span style={{ marginRight:8 }}>🔗 {node.relation}</span>}
-              {node.year&&<span>📅 b.{node.year}</span>}
-              {age&&<span style={{ marginLeft:8 }}>· {age} yrs</span>}
+              {member.id === selfId && <span style={{ marginRight:6, background:C.gold, color:"#fff", padding:"1px 5px", borderRadius:3, fontSize:"0.5rem", fontWeight:700 }}>YOU</span>}
+              {member.year&&`b. ${member.year}`} {age&&`· ${age} yrs`}
             </div>
           </div>
         </div>
         <button onClick={onClose} style={{ background:"none", border:"none", fontSize:"1.2rem", cursor:"pointer", color:C.textMuted, padding:4 }}>✕</button>
       </div>
-
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
-        <Tag label={node.gender==="F"?"Female":"Male"} color={node.gender==="F"?C.primaryLight:C.primary} />
-        {node.type&&<Tag label={node.type} color={C.gold} />}
-        {node.rip
-          ? <Tag label="Deceased" color={C.textSecondary} />
-          : <Tag label="Living" color={C.green} />
-        }
-      </div>
-
       <div onClick={onEdit} style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", background:C.goldFaint, border:`1px solid ${C.gold}40`, borderRadius:10, cursor:"pointer" }}>
-        <span style={{ fontSize:"1rem" }}>✏️</span>
-        <div>
-          <div style={{ fontSize:"0.72rem", fontWeight:700, color:C.primary, fontFamily:mono }}>Edit Tree</div>
-          <div style={{ fontSize:"0.6rem", color:C.textSecondary, fontFamily:mono }}>Details update કરવા Wizard ખોલો</div>
-        </div>
+        <span>✏️</span>
+        <div><div style={{ fontSize:"0.72rem", fontWeight:700, color:C.primary, fontFamily:mono }}>Edit Tree</div><div style={{ fontSize:"0.6rem", color:C.textSecondary, fontFamily:mono }}>Wizard ખોલો</div></div>
         <span style={{ marginLeft:"auto", color:C.textMuted }}>›</span>
       </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-function findNodeById(root, id) {
-  if (!root) return null;
-  if (root.id === id) return root;
-  for (const c of root.children||[]) { const f=findNodeById(c,id); if(f) return f; }
-  for (const s of root.siblings||[]) { if(s.id===id) return s; }
-  if (root.spouse?.id===id) return root.spouse;
-  return null;
+function Spinner() {
+  return <div style={{ width:40, height:40, borderRadius:"50%", border:`3px solid ${C.primary}`, borderTopColor:"transparent", animation:"spin 0.8s linear infinite" }} />;
 }
-
-function Tag({ label, color }) {
-  return (
-    <span style={{ fontSize:"0.6rem", padding:"2px 8px", borderRadius:10, border:`1px solid ${color}30`, background:color+"15", color, fontFamily:mono }}>
-      {label}
-    </span>
-  );
-}
-
 function Btn({ onClick, children }) {
-  return (
-    <button onClick={onClick} style={{ padding:"10px 24px", background:C.primary, color:"#fff", border:"none", borderRadius:10, fontSize:"0.88rem", fontWeight:700, cursor:"pointer", fontFamily:mono }}>
-      {children}
-    </button>
-  );
+  return <button onClick={onClick} style={{ padding:"10px 24px", background:C.primary, color:"#fff", border:"none", borderRadius:10, fontSize:"0.88rem", fontWeight:700, cursor:"pointer", fontFamily:mono }}>{children}</button>;
 }
-
 function Center({ children }) {
-  return (
-    <div style={{ minHeight:"100dvh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:C.bg, padding:24, gap:12, textAlign:"center", fontFamily:mono }}>
-      {children}
-    </div>
-  );
+  return <div style={{ minHeight:"100dvh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:C.bg, padding:24, gap:12, textAlign:"center", fontFamily:mono }}>{children}</div>;
 }
-
 function Styles() {
   return (
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:wght@700&display=swap');
-      @keyframes spin    { to { transform:rotate(360deg); } }
-      @keyframes fadeUp  { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
-      @keyframes flicker { 0%,100%{opacity:1} 40%{opacity:0.7} 60%{opacity:0.9} }
-      * { box-sizing: border-box; }
+      @keyframes spin       { to { transform:rotate(360deg); } }
+      @keyframes fadeUp     { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+      @keyframes flicker    { 0%,100%{opacity:1} 40%{opacity:0.7} 60%{opacity:0.9} }
+      @keyframes reviewPulse{ 0%,100%{box-shadow:0 2px 10px rgba(123,28,46,0.4)} 50%{box-shadow:0 2px 18px rgba(201,168,76,0.7)} }
+      * { box-sizing:border-box; }
       ::-webkit-scrollbar { width:4px; height:4px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #C9A84C40; border-radius:4px; }
-      @media (max-width: 380px) { .view-label { display: none; } }
+      ::-webkit-scrollbar-thumb { background:#C9A84C40; border-radius:4px; }
+      @media(max-width:380px){ .view-label{ display:none; } }
     `}</style>
   );
 }

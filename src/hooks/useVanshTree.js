@@ -1,29 +1,30 @@
-// hooks/useVanshTree.js — All tree wizard state in one hook.
-// Draft is persisted to localStorage so refresh doesn't lose progress.
+// hooks/useVanshTree.js
+// ─────────────────────────────────────────────────────────────────────────────
+// Wizard-only state hook. Manages the 8-step draft in localStorage.
+// Firestore writes happen only in VanshVriksha/index.jsx via familyTreeDb.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useCallback, useEffect } from "react";
 import { TREE_STEPS, ANC_RELATIONS, DESC_RELATIONS } from "../constants/vanshConstants";
 
 const INIT = {
-  self:       { name: "", gender: "", year: "" },
-  ancestors:  [],
-  descendants:[],
-  spouses:    {},   // { memberId: { name, gender, year, rip } }
-  siblings:   {},   // { memberId: { elder: [], younger: [] } }
-  cousins:    [],
+  self:        { name: "", gender: "", year: "" },
+  ancestors:   [],
+  descendants: [],
+  spouses:     {},
+  siblings:    {},
+  cousins:     [],
 };
 
-const DRAFT_KEY = "vansh_tree_draft";
+const DRAFT_KEY = "vansh_tree_draft_v2";   // v2 = new schema
 const load    = () => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)) || INIT; } catch { return INIT; } };
-const persist = (s)  => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(s)); } catch {} };
-const clear   = ()   => { try { localStorage.removeItem(DRAFT_KEY); } catch {} };
+const persist = (s) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(s)); } catch {} };
+const clear   = ()  => { try { localStorage.removeItem(DRAFT_KEY); } catch {} };
 
 export function useVanshTree() {
   const [state,   setState]   = useState(() => load());
   const [step,    setStep]    = useState(TREE_STEPS.SELF);
-  const [selNode, setSelNode] = useState(null);   // selected node id in full tree
 
-  // Persist on every change
   useEffect(() => { persist(state); }, [state]);
 
   const patch = useCallback(p => setState(s => ({ ...s, ...p })), []);
@@ -31,74 +32,100 @@ export function useVanshTree() {
   // ── Self ──────────────────────────────────────────────────────
   const setSelf = useCallback(fields => patch({ self: fields }), [patch]);
 
-  // ── Ancestors ────────────────────────────────────────────────
-  const setAncestors  = useCallback(list => patch({ ancestors: list }),  [patch]);
+  // ── Ancestors ─────────────────────────────────────────────────
+  const setAncestors  = useCallback(list => patch({ ancestors: list  }), [patch]);
 
-  // ── Descendants ──────────────────────────────────────────────
+  // ── Descendants ───────────────────────────────────────────────
   const setDescendants = useCallback(list => patch({ descendants: list }), [patch]);
 
-  // ── Spouses ──────────────────────────────────────────────────
-  const setSpouse = useCallback((memberId, spouseData) =>
-    setState(s => ({ ...s, spouses: { ...s.spouses, [memberId]: spouseData } })),
-  []);
-  const clearSpouse = useCallback(memberId =>
-    setState(s => { const sp = { ...s.spouses }; delete sp[memberId]; return { ...s, spouses: sp }; }),
-  []);
+  // ── Spouses ───────────────────────────────────────────────────
+  const setSpouse  = useCallback((key, data) =>
+    setState(s => ({ ...s, spouses: { ...s.spouses, [key]: data } })), []);
+  const clearSpouse = useCallback(key =>
+    setState(s => { const sp = { ...s.spouses }; delete sp[key]; return { ...s, spouses: sp }; }), []);
 
-  // ── Siblings ─────────────────────────────────────────────────
-  const setSiblingsFor = useCallback((memberId, data) =>
-    setState(s => ({ ...s, siblings: { ...s.siblings, [memberId]: data } })),
-  []);
+  // ── Siblings ──────────────────────────────────────────────────
+  const setSiblingsFor = useCallback((key, data) =>
+    setState(s => ({ ...s, siblings: { ...s.siblings, [key]: data } })), []);
 
-  // ── Cousins ──────────────────────────────────────────────────
-  const addCousin       = useCallback(c   => patch({ cousins: [...state.cousins, c] }), [patch, state.cousins]);
-  const toggleCousin    = useCallback(idx =>
-    setState(s => {
-      const cousins = s.cousins.map((c, i) => i === idx ? { ...c, selected: !c.selected } : c);
-      return { ...s, cousins };
-    }),
-  []);
+  // ── Cousins ───────────────────────────────────────────────────
+  const addCousin    = useCallback(c => setState(s => ({ ...s, cousins: [...s.cousins, c] })), []);
+  const toggleCousin = useCallback(idx =>
+    setState(s => ({
+      ...s,
+      cousins: s.cousins.map((c, i) => i === idx ? { ...c, selected: !c.selected } : c),
+    })), []);
 
-  // ── Navigation ───────────────────────────────────────────────
-  const goNext  = useCallback(() => setStep(s => Math.min(s + 1, TREE_STEPS.FULL_TREE)), []);
-  const goBack  = useCallback(() => setStep(s => Math.max(s - 1, TREE_STEPS.SELF)),      []);
-  const jumpTo  = useCallback(n  => { if (n <= step) setStep(n); },                       [step]);
+  // ── Navigation ────────────────────────────────────────────────
+  const goNext = useCallback(() => setStep(s => Math.min(s + 1, TREE_STEPS.FULL_TREE)), []);
+  const goBack = useCallback(() => setStep(s => Math.max(s - 1, TREE_STEPS.SELF)), []);
+  const jumpTo = useCallback(n => { if (n <= step) setStep(n); }, [step]);
+  const reset  = useCallback(() => { clear(); setState(INIT); setStep(TREE_STEPS.SELF); }, []);
 
-  const reset   = useCallback(() => { clear(); setState(INIT); setStep(TREE_STEPS.SELF); }, []);
+  /** Reload wizard from an existing family tree doc (for "edit" flow). */
+  const loadFromFamilyDoc = useCallback((treeDoc) => {
+    if (!treeDoc) return;
+    // Convert graph back to wizard arrays for editing
+    const members = treeDoc.members || {};
+    const selfMember = Object.values(members).find(m => m.isRegisteredUser) ||
+                       Object.values(members)[0] || {};
 
-  /** Load data from Firebase into local state (overwrites localStorage draft). */
-  const loadFromFirebase = useCallback(data => {
+    const selfId = Object.keys(members).find(id =>
+      members[id].isRegisteredUser || id === Object.keys(members)[0]
+    );
+
+    // Build ancestors chain from self upward
+    const buildAncestors = (id, acc = []) => {
+      const m = members[id];
+      if (!m) return acc;
+      const fatherId = m.fatherId;
+      if (!fatherId || !members[fatherId]) return acc;
+      acc.push({ ...members[fatherId], relation: ANC_RELATIONS[acc.length] || `ancestor${acc.length+1}` });
+      return buildAncestors(fatherId, acc);
+    };
+
+    const ancestors = buildAncestors(selfId);
+
+    // Descendants = children where fatherId or motherId = selfId
+    const descendants = Object.values(members)
+      .filter(m => m.fatherId === selfId || m.motherId === selfId)
+      .map((m, i) => ({ ...m, relation: DESC_RELATIONS[i] || `gen+${i+1}` }));
+
+    // Spouses
+    const spouses = {};
+    if (selfMember.spouseId && members[selfMember.spouseId]) {
+      spouses["self"] = members[selfMember.spouseId];
+    }
+
     setState({
-      self:        data.self        || INIT.self,
-      ancestors:   data.ancestors   || [],
-      descendants: data.descendants || [],
-      spouses:     data.spouses     || {},
-      siblings:    data.siblings    || {},
-      cousins:     data.cousins     || [],
+      self:        { name:selfMember.name, gender:selfMember.gender, year:selfMember.year },
+      ancestors,
+      descendants,
+      spouses,
+      siblings:    {},
+      cousins:     [],
     });
   }, []);
 
-  // ── Helpers ──────────────────────────────────────────────────
-  /** All vertical-line members (ancestors oldest→newest, self, descendants) */
+  // ── Helpers ───────────────────────────────────────────────────
   const getVerticalMembers = useCallback(() => {
-    const ancs  = [...state.ancestors].filter(a => a.name).reverse(); // oldest first
+    const ancs  = [...state.ancestors].filter(a => a.name).reverse();
     const descs = state.descendants.filter(d => d.name);
     return [
-      ...ancs.map((a, i) => ({ id: "anc_"+i, name: a.name, gender: a.gender, relation: a.relation, isYou: false })),
-      { id: "self", name: state.self.name, gender: state.self.gender, relation: "YOU", isYou: true },
-      ...descs.map((d, i) => ({ id: "desc_"+i, name: d.name, gender: d.gender, relation: d.relation, isYou: false })),
+      ...ancs.map((a, i) => ({ id:"anc_"+i, name:a.name, gender:a.gender, relation:a.relation, isYou:false })),
+      { id:"self", name:state.self.name, gender:state.self.gender, relation:"YOU", isYou:true },
+      ...descs.map((d, i) => ({ id:"desc_"+i, name:d.name, gender:d.gender, relation:d.relation, isYou:false })),
     ];
-  }, [state.ancestors, state.descendants, state.self]);
+  }, [state]);
 
   const getAllMembers = useCallback(() => [
-    { name: state.self.name, gender: state.self.gender },
+    { name:state.self.name, gender:state.self.gender },
     ...state.ancestors.filter(a => a.name),
     ...state.descendants.filter(d => d.name),
     ...Object.values(state.spouses).filter(Boolean),
   ].filter(m => m.name), [state]);
 
   return {
-    // state
     self:        state.self,
     ancestors:   state.ancestors,
     descendants: state.descendants,
@@ -106,30 +133,14 @@ export function useVanshTree() {
     siblings:    state.siblings,
     cousins:     state.cousins,
     step,
-    selNode,
 
-    // actions
-    setSelf,
-    setAncestors,
-    setDescendants,
-    setSpouse,
-    clearSpouse,
-    setSiblingsFor,
-    addCousin,
-    toggleCousin,
-    setSelNode,
-    goNext,
-    goBack,
-    jumpTo,
-    reset,
-    loadFromFirebase,
+    setSelf, setAncestors, setDescendants,
+    setSpouse, clearSpouse, setSiblingsFor,
+    addCousin, toggleCousin,
+    goNext, goBack, jumpTo, reset,
+    loadFromFamilyDoc,
+    getVerticalMembers, getAllMembers,
 
-    // helpers
-    getVerticalMembers,
-    getAllMembers,
-
-    // constants re-exported for convenience
-    ANC_RELATIONS,
-    DESC_RELATIONS,
+    ANC_RELATIONS, DESC_RELATIONS,
   };
 }
