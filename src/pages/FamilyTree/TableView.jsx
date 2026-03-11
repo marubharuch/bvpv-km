@@ -127,7 +127,7 @@ function MobileCard({ chain, genCols, nodes, mn, onNameClick, index }) {
 }
 
 /* ── Main TableView ── */
-export default function TableView({ nodes, onEditPerson, savedRowOrder, onSaveRowOrder, onResetRowOrder }) {
+export default function TableView({ nodes, onEditPerson, savedRowOrder, onSaveRowOrder, onResetRowOrder, onFlushToFirestore }) {
   const [isMobile] = useState(()=>typeof window!=='undefined'&&window.innerWidth<700);
   const [viewMode,setViewMode] = useState(()=>typeof window!=='undefined'&&window.innerWidth<700?'card':'table');
   const [selected,setSelected] = useState(null);   // {rowIdx, gen}
@@ -314,10 +314,12 @@ export default function TableView({ nodes, onEditPerson, savedRowOrder, onSaveRo
     }
   };
 
-  // Save order to Firestore
-  const handleSave = () => {
+  // Save — order + Firestore flush
+  const handleSave = async () => {
     const orderToSave = customOrder || allPaths.map(p=>leafIdOf(p));
     onSaveRowOrder && onSaveRowOrder(orderToSave);
+    // Firestore mein save karo (nodes + order dono)
+    if (onFlushToFirestore) await onFlushToFirestore(orderToSave);
     setSaveFlash(true);
     if(flashRef.current) clearTimeout(flashRef.current);
     flashRef.current = setTimeout(()=>setSaveFlash(false), 2500);
@@ -414,16 +416,16 @@ export default function TableView({ nodes, onEditPerson, savedRowOrder, onSaveRo
 
         {/* Right: save / reset / view toggle */}
         <span style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
-          {/* Save button */}
-          {isDirty&&(
+          {/* Save button — hamesha dikhta hai */}
+          {!saveFlash ? (
             <button onClick={handleSave} style={{
               padding:'4px 14px',borderRadius:5,border:'none',cursor:'pointer',
-              background:C.green,color:'#fff',fontSize:11,fontWeight:700,
-              boxShadow:'0 2px 6px rgba(46,125,50,0.3)'}}>
-              💾 Save Order
+              background:isDirty ? C.green : C.gold,
+              color:'#fff',fontSize:11,fontWeight:700,
+              boxShadow:`0 2px 6px rgba(${isDirty?'46,125,50':'196,153,58'},0.3)`}}>
+              {isDirty ? '💾 Save Order' : '💾 Save'}
             </button>
-          )}
-          {saveFlash&&(
+          ) : (
             <span style={{fontSize:11,color:C.green,fontWeight:600}}>✓ Saved!</span>
           )}
           {customOrder&&(

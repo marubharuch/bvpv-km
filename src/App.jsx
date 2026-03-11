@@ -27,6 +27,8 @@ const StudentsPage           = lazy(() => import("./pages/StudentsPage"));
 const VanshTreeView          = lazy(() => import("./pages/VanshTreeView"));
 const VanshVriksha            = lazy(() => import("./pages/VanshVriksha"));
 const FamilyTree              = lazy(() => import("./pages/FamilyTree"));
+const TreeWrapper             = lazy(() => import("./pages/FamilyTree/TreeWrapper"));
+const TreeGuestPage           = lazy(() => import("./pages/Tree"));
 function AppRoutes() {
   const { ready } = useAuth();
   if (!ready) return <Spinner message="Loading…" />;
@@ -58,7 +60,8 @@ function AppRoutes() {
         </Route>
           <Route path="/vansh" element={<VanshVriksha />} />
           <Route path="/tree1" element={<VanshTreeView />} />
-          <Route path="/tree" element={<FamilyTree uid={"user?.uid"} />} />
+          <Route path="/tree"          element={<PrivateRoute><TreeWrapper /></PrivateRoute>} />
+          <Route path="/tree/:treeId"  element={<TreeGuestPage />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
