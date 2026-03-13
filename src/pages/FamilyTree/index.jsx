@@ -1,7 +1,7 @@
 // pages/FamilyTree/index.jsx
 import { useState, useRef, useEffect } from 'react';
 import { useFamilyTree }   from '../../hooks/useFamilyTree';
-import { createTree, buildWhatsAppInvite, addInvitedContacts } from '../../db/treedb'; // treeDb.js ke functions  
+import { createTree, buildWhatsAppInvite, addInvitedContacts } from '../../db/treeDb'; // treeDb.js ke functions  
 import { useContactPicker } from '../../hooks/useContactPicker';
 import MobileInput          from '../../components/ui/MobileInput';
 import EditView  from './EditView';
@@ -437,15 +437,14 @@ export default function FamilyTree({
           focusId={focusId} readOnly={readOnly} />
       )}
       {initDone && view==='table' && (
-        <TableView nodes={nodes} onEditPerson={readOnly ? null : handleEditPerson}
-          savedRowOrder={rowOrder}
-          onSaveRowOrder={readOnly ? null : saveRowOrder}
-          onResetRowOrder={readOnly ? null : resetRowOrder}
-          onFlushToFirestore={readOnly ? null : async (order) => {
-            // order ke saath Firestore mein save karo
-            if (order) saveRowOrder(order);
-            else await flushToFirestore();
-          }} />
+  <TableView
+  nodes={nodes}
+  onEditPerson={handleEditPerson}
+  savedRowOrder={rowOrder}
+  onSaveRowOrder={saveRowOrder}
+  onResetRowOrder={resetRowOrder}
+  onFlushToFirestore={flushToFirestore}
+/>
       )}
 
       <Toast msg={toast} />

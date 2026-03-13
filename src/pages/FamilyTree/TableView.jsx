@@ -139,7 +139,7 @@ export default function TableView({ nodes, onEditPerson, savedRowOrder, onSaveRo
   useEffect(()=>{
     if (savedRowOrder) setCustomOrder(savedRowOrder);
   }, [savedRowOrder]);
-
+console.log("Rendering TableView with nodes:");
   const ns=nodes.filter(n=>!n.spouseOf);
   if(ns.length===0) return(
     <div style={{padding:40,textAlign:'center',color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>

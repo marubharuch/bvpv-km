@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth }             from '../../store/AuthContext';
-import { getTreesByUid, createTree, saveTreeData } from '../../db/treedb'; // treeDb.js ke functions    
+import { getTreesByUid, createTree, saveTreeData } from '../../db/treeDb'; // treeDb.js ke functions    
 import FamilyTree              from './index';
 
 const C = {

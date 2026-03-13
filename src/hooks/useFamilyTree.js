@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getTree, saveTreeData } from '../db/treedb'; // treeDb.js ke functions
+import { getTree, saveTreeData } from '../db/treeDb'; // treeDb.js ke functions
 
 const lsKey     = (treeId) => `vt_nodes_${treeId}`;
 const lsMetaKey = (treeId) => `vt_meta_${treeId}`;
