@@ -247,3 +247,31 @@ export function computeLineageStats(members, selfId) {
 export function membersArray(members) {
   return Object.entries(members).map(([id, m]) => ({ ...m, id }));
 }
+
+export function getRelationship(members, fromId, toId) {
+  // basic fallback logic (you can improve later)
+  if (fromId === toId) return "self";
+
+  const from = members[fromId];
+  const to = members[toId];
+  if (!from || !to) return "unknown";
+
+  // spouse
+  if (from.spouseId === toId) return "spouse";
+
+  // parent
+  if (to.fatherId === fromId || to.motherId === fromId) return "parent";
+
+  // child
+  if (from.fatherId === toId || from.motherId === toId) return "child";
+
+  // sibling
+  if (
+    (from.fatherId && from.fatherId === to.fatherId) ||
+    (from.ancestorId && from.ancestorId === to.ancestorId)
+  ) {
+    return "sibling";
+  }
+
+  return "relative";
+}

@@ -44,14 +44,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let unsub;
     (async () => {
-      const [{ getAuth, onAuthStateChanged }] = await Promise.all([
-        import("firebase/auth"),
-      ]);
-
-      const auth = getAuth(
-        (await import("../lib/firebase")).getApp?.() ??
-        (await import("firebase/app")).getApps()[0]
-      );
+      // Import auth directly from our firebase.js — already initialised with the app.
+      // Do NOT call getAuth() again — that risks creating a second instance
+      // which never fires onAuthStateChanged, leaving the UI stuck after Google login.
+      const { auth } = await import("../lib/firebase");
+      const { onAuthStateChanged } = await import("firebase/auth");
 
       unsub = onAuthStateChanged(auth, async (firebaseUser) => {
         if (!firebaseUser) {

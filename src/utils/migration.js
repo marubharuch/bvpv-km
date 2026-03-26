@@ -6,10 +6,7 @@
 
 import { doc, getDoc } from "firebase/firestore";
 import { firestore }   from "../lib/firebase";
-import {
-  migrateOldTree,
-  getUserFamilyPointer,
-} from "../db/familyTreeDb";
+//import {  migrateOldTree,  getUserFamilyPointer,} from "../db/familyTreeDb";
 
 /** Returns the user's { familyId, memberId } pointer, migrating if needed. */
 export async function migrateIfNeeded(uid) {

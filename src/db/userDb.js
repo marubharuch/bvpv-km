@@ -1,111 +1,96 @@
 // db/userDb.js
-// mobile on users node = ALWAYS fullMobile "+91XXXXXXXXXX"
+// v3.0 — mobileIndexDb dependency removed (zero data, not needed)
+// mobile = ALWAYS fullMobile "+91XXXXXXXXXX"
 
-import { rtdb }                          from "./rtdb";
-import { userDoc }                       from "./schema";
-import { emailToKey }                    from "../lib/text";
-import { toMobileKey, toFullMobile }     from "../lib/phone";
-import { buildMobileIndexWrites }        from "./mobileIndexDb";
+import { rtdb }                      from "./rtdb";
+import { userDoc }                   from "./schema";
+import { emailToKey }                from "../lib/text";
+import { toFullMobile }              from "../lib/phone";
 
 /** Create user node if it doesn't exist yet. */
 export async function ensureUser(firebaseUser, extra = {}) {
   if (!firebaseUser?.uid) return;
 
   const cc          = extra.countryCode || "+91";
-  const full        = extra.mobile      || null;  // must be fullMobile if provided
+  const full        = extra.mobile      || null;
   const displayName = extra.displayName || firebaseUser.displayName || null;
 
   const existing = await rtdb.get(`users/${firebaseUser.uid}`);
+
   if (!existing) {
     const writes = {};
     writes[`users/${firebaseUser.uid}`] = userDoc({
       displayName,
       email:       firebaseUser.email || null,
-      mobile:      full,
+      phone:       full,
       countryCode: cc,
     });
     if (firebaseUser.email) {
       writes[`usersByEmail/${emailToKey(firebaseUser.email)}`] = firebaseUser.uid;
     }
-    if (full) {
-      Object.assign(writes, buildMobileIndexWrites(full, cc, {
-        isUser: true, userUid: firebaseUser.uid,
-      }));
-    }
     await rtdb.batch(writes);
   } else {
-    // Patch missing fields without overwriting existing data
+    // Patch missing fields only
     const writes = {};
     if (displayName && !existing.displayName)
       writes[`users/${firebaseUser.uid}/displayName`] = displayName;
-    if (full && !existing.mobile) {
-      writes[`users/${firebaseUser.uid}/mobile`]      = full;
+    if (full && !existing.phone) {
+      writes[`users/${firebaseUser.uid}/phone`]       = full;
       writes[`users/${firebaseUser.uid}/countryCode`] = cc;
-      Object.assign(writes, buildMobileIndexWrites(full, cc, {
-        isUser: true, userUid: firebaseUser.uid,
-      }));
     }
     if (Object.keys(writes).length) await rtdb.batch(writes);
   }
 }
 
-/** Save mobile to existing user node (called after mobile prompt). */
+/** Save phone to existing user node. */
 export async function saveUserMobile(uid, fullMobile, countryCode = "+91") {
   if (!uid || !fullMobile) return;
-  const writes = {};
-  writes[`users/${uid}/mobile`]      = fullMobile;
-  writes[`users/${uid}/countryCode`] = countryCode;
-  Object.assign(writes, buildMobileIndexWrites(fullMobile, countryCode, {
-    isUser: true, userUid: uid,
-  }));
-  await rtdb.batch(writes);
+  await rtdb.update(`users/${uid}`, {
+    phone:       fullMobile,
+    countryCode: countryCode,
+    updatedAt:   Date.now(),
+  });
 }
 
-/** Fetch user data. Falls back to email-key for old records. */
+/** Fetch user data. */
 export async function getUser(uid, email = null) {
   const data = await rtdb.get(`users/${uid}`);
   if (data) return data;
+
+  // Fallback for old email-key records
   if (email) {
     const old = await rtdb.get(`users/${emailToKey(email)}`);
-    if (old) { await rtdb.set(`users/${uid}`, { ...old, email }); return { ...old, email }; }
+    if (old) {
+      await rtdb.set(`users/${uid}`, { ...old, email });
+      return { ...old, email };
+    }
   }
   return {};
 }
 
 /**
- * Link a user to a family after PIN verification.
- * fullMobile must be "+91XXXXXXXXXX" format.
+ * Link a user to a family.
+ * Called after invite accepted + registration.
  */
 export async function linkUserToFamily({ uid, familyId, memberId, fullMobile, countryCode, email, ts = Date.now() }) {
   const cc = countryCode || "+91";
   const writes = {};
 
-  writes[`users/${uid}/familyId`]    = familyId;
-  writes[`users/${uid}/role`]        = "member";
-  writes[`users/${uid}/status`]      = "active";
+  writes[`users/${uid}/familyId`]  = familyId;
+  writes[`users/${uid}/role`]      = "member";
+  writes[`users/${uid}/status`]    = "active";
+  writes[`users/${uid}/updatedAt`] = ts;
+
   if (memberId)   writes[`users/${uid}/memberId`]    = memberId;
-  if (fullMobile) writes[`users/${uid}/mobile`]      = fullMobile;
+  if (fullMobile) writes[`users/${uid}/phone`]       = fullMobile;
   if (cc)         writes[`users/${uid}/countryCode`] = cc;
+  if (email)      writes[`usersByEmail/${emailToKey(email)}`] = uid;
 
-  if (memberId) {
-    writes[`families/${familyId}/members/${memberId}`] = true;
-    writes[`members/${memberId}/linkedUid`]            = uid;
-    if (email) writes[`members/${memberId}/email`]     = email;
-    writes[`members/${memberId}/updatedAt`]            = ts;
-  }
-  if (email) writes[`usersByEmail/${emailToKey(email)}`] = uid;
-
-  if (fullMobile) {
-    Object.assign(writes, buildMobileIndexWrites(fullMobile, cc, {
-      isUser: true, userUid: uid, memberId, familyId,
-    }));
-    // Mark connector as joined
-    const connKey = toMobileKey(fullMobile);
-    const conn    = await rtdb.get(`connectors/${connKey}`);
-    if (conn) {
-      writes[`connectors/${connKey}/joinedUserId`] = uid;
-      writes[`connectors/${connKey}/joinedAt`]     = ts;
-    }
+  // Add familyId to familyIds array
+  const existing = await rtdb.get(`users/${uid}`);
+  const existingFamilyIds = existing?.familyIds || [];
+  if (!existingFamilyIds.includes(familyId)) {
+    writes[`users/${uid}/familyIds`] = [...existingFamilyIds, familyId];
   }
 
   await rtdb.batch(writes);

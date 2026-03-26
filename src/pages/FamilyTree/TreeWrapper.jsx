@@ -1,16 +1,18 @@
 // pages/FamilyTree/TreeWrapper.jsx
-// Creator ka entry point — /tree route
-// PrivateRoute ke andar hai — user hamesha logged in hoga
+// Registered user ka entry point — /tree route
+//
+// RULE: User khud tree nahi bana sakta.
+//       Sirf admin invite karta hai — WhatsApp link + PIN ke zariye.
 //
 // Flow:
-//   1. uid se getTreesByUid → koi tree hai?
-//   2. Nahi → FamilyTree kholo (InitDialog dikhega)
-//   3. Ek tree → seedha open
-//   4. Multiple → list dikhao, select karo
+//   1. uid se getTreesByUid → trees load karo
+//   2. Koi tree nahi → "Admin se invite maango" screen
+//   3. Ek tree      → seedha open
+//   4. Multiple     → list dikhao, select karo
 
 import { useState, useEffect } from 'react';
 import { useAuth }             from '../../store/AuthContext';
-import { getTreesByUid, createTree, saveTreeData } from '../../db/treeDb'; // treeDb.js ke functions    
+import { getTreesByUid }       from '../../db/treeDb';
 import FamilyTree              from './index';
 
 const C = {
@@ -18,8 +20,40 @@ const C = {
   cream:'#fefcf5', bg:'#f9f5e7', muted:'#9c7c5a',
 };
 
-// ── Tree list (multiple trees) ────────────────────────────────────────────────
-function TreeList({ trees, onSelect, onCreate }) {
+// ── No tree screen ─────────────────────────────────────────────────────────────
+function NoTreeScreen() {
+  return (
+    <div style={{minHeight:'100vh',background:C.bg,
+      fontFamily:"'DM Sans',sans-serif",
+      display:'flex',flexDirection:'column',alignItems:'center',
+      justifyContent:'center',padding:24,textAlign:'center'}}>
+      <div style={{fontSize:56,marginBottom:16}}>🌳</div>
+      <h2 style={{fontFamily:"'DM Serif Display',serif",fontSize:22,
+        color:C.maroon,marginBottom:10,fontWeight:400}}>
+        Koi Vansh Vriksha nahi mila
+      </h2>
+      <p style={{fontSize:14,color:C.muted,lineHeight:1.7,
+        maxWidth:300,marginBottom:28}}>
+        Aapko kisi ne abhi tak invite nahi kiya.
+        Admin se WhatsApp par invite link mangao.
+      </p>
+      <div style={{background:'#fff',border:`1.5px solid ${C.border}`,
+        borderRadius:12,padding:'16px 20px',maxWidth:320,width:'100%',
+        fontSize:13,color:C.muted,lineHeight:1.7,textAlign:'left'}}>
+        <div style={{fontWeight:700,color:C.maroon,marginBottom:8}}>
+          📲 Kaise join karein?
+        </div>
+        <div>1. Admin se WhatsApp par link maango</div>
+        <div>2. Link kholo — tree dikhega</div>
+        <div>3. Apna mobile number aur PIN daalo</div>
+        <div>4. Edit karo ya register karo</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tree list (multiple trees) ─────────────────────────────────────────────────
+function TreeList({ trees, onSelect }) {
   return (
     <div style={{minHeight:'100vh',background:C.bg,
       fontFamily:"'DM Sans',sans-serif"}}>
@@ -53,42 +87,39 @@ function TreeList({ trees, onSelect, onCreate }) {
             <span style={{fontSize:22,color:C.gold}}>›</span>
           </div>
         ))}
-        <button onClick={onCreate}
-          style={{width:'100%',padding:'13px 0',borderRadius:10,
-            border:`2px dashed ${C.gold}`,background:'transparent',
-            color:C.maroon,fontWeight:700,fontSize:14,
-            cursor:'pointer',marginTop:6}}>
-          + Naya Vansh Vriksha
-        </button>
       </div>
     </div>
   );
 }
 
-// ── Main TreeWrapper ──────────────────────────────────────────────────────────
+// ── Main TreeWrapper ───────────────────────────────────────────────────────────
 export default function TreeWrapper() {
   const { user } = useAuth();
-  const [myTrees,     setMyTrees]     = useState(null);  // null = loading
-  const [activeTid,   setActiveTid]   = useState(null);
-  const [activePin,   setActivePin]   = useState(null);
-  const [showList,    setShowList]    = useState(false);
+  const [myTrees,   setMyTrees]   = useState(null);  // null = loading
+  const [activeTid, setActiveTid] = useState(null);
+  const [activePin, setActivePin] = useState(null);
+  const [showList,  setShowList]  = useState(false);
 
-  // Load trees on mount
   useEffect(() => {
     if (!user?.uid) return;
 
-    // Step 1: localStorage se cache check karo (instant)
     const lsCacheKey = `vt_treelist_${user.uid}`;
+
+    // localStorage cache — instant load
     try {
       const cached = localStorage.getItem(lsCacheKey);
       if (cached) {
         const trees = JSON.parse(cached);
         const ids   = Object.keys(trees || {});
         if (ids.length === 1) {
-          setMyTrees(trees);
-          setActiveTid(ids[0]);
-          setActivePin(trees[ids[0]]?.pin || null);
-          return; // Firestore check background mein bhi kar sakte hain
+          const pin = trees[ids[0]]?.pin || null;
+          // Only use cache if pin is present — otherwise fall through to Firestore
+          if (pin) {
+            setMyTrees(trees);
+            setActiveTid(ids[0]);
+            setActivePin(pin);
+            return;
+          }
         } else if (ids.length > 1) {
           setMyTrees(trees);
           setShowList(true);
@@ -97,21 +128,31 @@ export default function TreeWrapper() {
       }
     } catch {}
 
-    // Step 2: Firestore se load karo (cache miss ya naya user)
+    // Firestore se load karo
     getTreesByUid(user.uid)
-      .then(trees => {
+      .then(async trees => {
         const ids = Object.keys(trees || {});
-
-        // Cache save karo
         try { localStorage.setItem(lsCacheKey, JSON.stringify(trees)); } catch {}
 
         if (ids.length === 0) {
-          setMyTrees({});
-          setActiveTid('__new__');
+          setMyTrees({});  // koi tree nahi — NoTreeScreen dikhega
         } else if (ids.length === 1) {
+          const tid = ids[0];
+          let pin = trees[tid]?.pin || null;
+          // If pin missing in RTDB (anonymous users), fetch from Firestore
+          if (!pin) {
+            const { getTree } = await import('../../db/treeDb');
+            const treeData = await getTree(tid);
+            pin = treeData?.pin || null;
+            // Backfill RTDB so next load is instant
+            if (pin) {
+              const { rtdb } = await import('../../db/rtdb');
+              rtdb.update(`userTrees/${user.uid}/${tid}`, { pin }).catch(() => {});
+            }
+          }
           setMyTrees(trees);
-          setActiveTid(ids[0]);
-          setActivePin(trees[ids[0]]?.pin || null);
+          setActiveTid(tid);
+          setActivePin(pin);
         } else {
           setMyTrees(trees);
           setShowList(true);
@@ -119,47 +160,6 @@ export default function TreeWrapper() {
       })
       .catch(console.error);
   }, [user?.uid]);
-
-  // Naya tree Firestore mein save karo jab InitDialog se naam milta hai
-  // FamilyTree/index.jsx ka initTree() local state set karta hai
-  // Hamen Firestore mein createTree() call karna hai
-  // Isliye onTreeInit callback pass karte hain
-  const handleTreeInit = async (rawInput, nodes) => {
-    // rawInput = "Dhruv Sanjay Gunvantlal..."
-    // nodes = useFamilyTree ne jo banaye — Firestore mein bhi save honge
-    const names = rawInput.trim().split(/\s+/).filter(Boolean);
-    if (!names.length) return;
-    const treeName = names[0] + "'s Vansh Vriksha";
-    try {
-      // nodes ke saath createTree — Firestore mein data bhi rahega
-      const { treeId, pin } = await createTree(user.uid, treeName, nodes || [], []);
-
-      // localStorage '__new__' → real treeId pe migrate karo
-      try {
-        const tmpNodes = localStorage.getItem('vt_nodes___new__');
-        if (tmpNodes) localStorage.setItem(`vt_nodes_${treeId}`, tmpNodes);
-        localStorage.setItem(`vt_meta_${treeId}`,
-          JSON.stringify({ treeName, rowOrder: null }));
-        localStorage.removeItem('vt_nodes___new__');
-        localStorage.removeItem('vt_meta___new__');
-      } catch {}
-
-      const updatedTrees = {
-        ...(myTrees || {}),
-        [treeId]: { role: 'creator', treeName, pin, createdAt: Date.now() },
-      };
-      // localStorage cache update karo
-      try {
-        localStorage.setItem(`vt_treelist_${user.uid}`, JSON.stringify(updatedTrees));
-      } catch {}
-
-      setActiveTid(treeId);
-      setActivePin(pin);
-      setMyTrees(updatedTrees);
-    } catch(e) {
-      console.error('createTree failed:', e);
-    }
-  };
 
   // Loading
   if (myTrees === null) return (
@@ -170,6 +170,9 @@ export default function TreeWrapper() {
     </div>
   );
 
+  // Koi tree nahi
+  if (Object.keys(myTrees).length === 0) return <NoTreeScreen />;
+
   // Multiple trees list
   if (showList && !activeTid) return (
     <TreeList
@@ -179,22 +182,17 @@ export default function TreeWrapper() {
         setActivePin(info?.pin || null);
         setShowList(false);
       }}
-      onCreate={() => {
-        setActiveTid('__new__');
-        setShowList(false);
-      }}
     />
   );
 
   // Active tree open
   if (activeTid) return (
     <FamilyTree
-      treeId={activeTid === '__new__' ? null : activeTid}
+      treeId={activeTid}
       email={user?.email}
       isCreator={true}
       pin={activePin}
       readOnly={false}
-      onTreeInit={handleTreeInit}
       onBack={Object.keys(myTrees).length > 1
         ? () => { setActiveTid(null); setShowList(true); }
         : null

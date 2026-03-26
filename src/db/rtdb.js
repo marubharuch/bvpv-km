@@ -1,41 +1,51 @@
-// db/rtdb.js — ONLY file that imports Firebase write methods.
-// All other DB files call these functions. Never import set/update/push elsewhere.
+// db/rtdb.js — Firebase Realtime Database wrapper
+// Provides a simple get/set/update/remove API used throughout the tree system.
 
-import { ref, get, set, update, push, remove } from "firebase/database";
-import { db } from "../lib/firebase";
+import { getDatabase, ref, get, set, update, remove, push } from 'firebase/database';
 
+/**
+ * Thin wrapper around Firebase RTDB.
+ * Usage:
+ *   await rtdb.get('users/abc123')         → data or null
+ *   await rtdb.set('users/abc123', data)
+ *   await rtdb.update('trees/XYZ', patch)
+ *   await rtdb.remove('trees/XYZ/nodes/n1')
+ *   const key = await rtdb.push('trees/XYZ/nodes', data)
+ */
 export const rtdb = {
-  /** Atomic multi-path write. */
-  batch:  (updates)      => update(ref(db), updates),
-
-  /** Set (overwrite) a path. */
-  set:    (path, data)   => set(ref(db, path), data),
-
-  /** Partial update (merge) at path. */
-  update: (path, data)   => update(ref(db, path), data),
-
-  /** Push new child, return key. */
-  push: async (path, data) => {
-    const r = push(ref(db, path));
-    if (data !== undefined) await set(r, data);
-    return r.key;
+  /** Read a path. Returns data or null. */
+  async get(path) {
+    const db       = getDatabase();
+    const snapshot = await get(ref(db, path));
+    return snapshot.exists() ? snapshot.val() : null;
   },
 
-  /** Remove a node. */
-  remove: (path) => remove(ref(db, path)),
-
-  /** One-time read — returns value or null. */
-  get: async (path) => {
-    const snap = await get(ref(db, path));
-    return snap.exists() ? snap.val() : null;
+  /** Write (overwrite) a path. */
+  async set(path, data) {
+    const db = getDatabase();
+    await set(ref(db, path), data);
   },
 
-  /** One-time read returning array of { id, ...val } */
-  getList: async (path) => {
-    const snap = await get(ref(db, path));
-    if (!snap.exists()) return [];
-    const items = [];
-    snap.forEach(child => items.push({ id: child.key, ...child.val() }));
-    return items;
+  /** Merge-update a path (shallow patch). */
+  async update(path, data) {
+    const db = getDatabase();
+    await update(ref(db, path), data);
+  },
+
+  /** Delete a path. */
+  async remove(path) {
+    const db = getDatabase();
+    await remove(ref(db, path));
+  },
+
+  /**
+   * Push a new child under path (auto-generated key).
+   * Returns the new key string.
+   */
+  async push(path, data) {
+    const db      = getDatabase();
+    const newRef  = push(ref(db, path));
+    await set(newRef, data);
+    return newRef.key;
   },
 };

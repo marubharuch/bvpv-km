@@ -1,7 +1,15 @@
 // lib/cloudinary.js — Cloudinary upload helpers.
-const CLOUD_NAME    = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME  || "dv6wequla";
-const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "bvpvkm";
-const API_URL       = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`;
+const CLOUD_NAME    = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+
+if (!CLOUD_NAME || !UPLOAD_PRESET) {
+  console.error(
+    '[Cloudinary] Missing env vars: VITE_CLOUDINARY_CLOUD_NAME and/or VITE_CLOUDINARY_UPLOAD_PRESET. ' +
+    'Add them to your .env file.'
+  );
+}
+
+const API_URL = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`;
 
 /** Upload a File or base64 string. Returns secure_url. */
 export async function uploadImage(file, folder = "member-photos") {

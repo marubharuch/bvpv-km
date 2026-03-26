@@ -53,7 +53,7 @@ export default function BottomNavbar() {
       {!user?.uid
         ? <NavItem to="/login"        icon={LogIn}           label="Login"       id="tour-last" />
         : hasFamily
-          ? <NavItem to="/dashboard"    icon={LayoutDashboard} label="Dashboard"   id="tour-last"  />
+          ? <NavItem to="/tree"    icon={LayoutDashboard} label="Dashboard"   id="tour-last"  />
           : <NavItem to="/registration" icon={LayoutDashboard} label="Register"    id="tour-last"  />
       }
     </nav>

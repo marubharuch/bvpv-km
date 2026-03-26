@@ -3,7 +3,7 @@ import { useState, useEffect }    from "react";
 import { useNavigate }            from "react-router-dom";
 import { useAuth }                from "../store/AuthContext";
 import { getUser, linkUserToFamily } from "../db/userDb";
-import { getMobileIndex }         from "../db/mobileIndexDb";
+//import { getMobileIndex }         from "../db/mobileIndexDb";
 import { rtdb }                   from "../db/rtdb";
 import { toMobileKey, toFullMobile } from "../lib/phone";
 import { COLORS }                 from "../constants/app";
@@ -53,6 +53,7 @@ export default function OnboardingPage() {
     setStage(S.CHECKING);
     setErr("");
     try {
+      // key can be fullMobile (+919974021397) or 10-digit — getMobileIndex handles both
       const idx = await getMobileIndex(key);
       if (!idx) { setStage(S.NOTFOUND); return; }
 
@@ -82,9 +83,9 @@ export default function OnboardingPage() {
     if (digits.length < 10) { setErr("Enter a valid 10-digit mobile number."); return; }
     const full = toFullMobile(cc, digits);
     setMob10(digits);
-    // Save to user node
+    // Save mobile to user node immediately — tree editor check depends on this
     await rtdb.update(`users/${user.uid}`, { mobile: full, countryCode: cc });
-    await checkMobile(digits);
+    await checkMobile(full);  // pass fullMobile not just digits
   };
 
   const handlePinSubmit = async () => {
@@ -141,7 +142,9 @@ export default function OnboardingPage() {
           <div className="text-5xl">🏠</div>
           <h2 className="text-lg font-bold" style={{ color: COLORS.primaryDark }}>No Family Found</h2>
           <p className="text-sm" style={{ color: COLORS.textSecondary }}>Your mobile is not linked to any family yet.</p>
-          <button onClick={() => navigate("/registration")}
+          <button onClick={() => navigate("/registration", {
+              state: { prefillMobile: toFullMobile(cc, mob10), prefillCc: cc }
+            })}
             className="w-full py-3 rounded-xl text-sm font-bold text-white" style={{ background: COLORS.primary }}>
             Register My Family →
           </button>
@@ -194,7 +197,9 @@ export default function OnboardingPage() {
           <button onClick={() => setStage(S.ASK)}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold border-2"
             style={{ borderColor: COLORS.border, color: COLORS.textSecondary }}>← Different Number</button>
-          <button onClick={() => navigate("/registration")}
+          <button onClick={() => navigate("/registration", {
+              state: { prefillMobile: toFullMobile(cc, mob10), prefillCc: cc }
+            })}
             className="flex-1 py-2.5 rounded-xl text-xs font-semibold border-2"
             style={{ borderColor: COLORS.border, color: COLORS.textSecondary }}>Not My Family</button>
         </div>

@@ -1,323 +1,300 @@
-// db/treeDb.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Firestore:
-//   meta/treeCounter          → { lastId: 42 }  (auto-increment)
-//   trees/{treeId}            → tree data
-//   treesByUid/{uid}          → creator ke trees ka pointer
+// db/treeDb.js — All tree-related database operations
 //
-// RTDB (naya node — directory se bilkul alag):
-//   treeEditors/{treeId}/{mobileKey} → { phone, name, verifiedAt, lastSeen }
+// ── Firestore  trees/{treeId} ─────────────────────────────────────────────────
+//    treeName, pin, adminUid, createdAt
+//    invited:  [ {name, phone} ]     ← still kept for PIN verify lookup
+//    nodes:    { [nodeId]: {...} }
+//    rowOrder: string[]
+//    activityLog: [ {...} ]
 //
-// RULES:
-//   Creator = uid zaroori (logged-in)
-//   Editor  = PIN verify → phone RTDB treeEditors mein save
-//   Viewer  = sirf URL, koi verify nahi
+// ── RTDB  invites/{mobileKey} ────────────────────────────────────────────────  ← NEW
+//    name, phone, treeId, treeName, pin, invitedBy, invitedAt, status
+//    Fast O(1) lookup: "has this phone already been invited anywhere?"
 //
-// Directory nodes TOUCH NAHI: families/, members/, mobileIndex/, users/
-// ─────────────────────────────────────────────────────────────────────────────
+// ── RTDB  userTrees/{uid}/{treeId} ───────────────────────────────────────────
+//    treeName, pin, joinedAt
+//
+// ── RTDB  treeEditors/{treeId}/{mobileKey} ───────────────────────────────────
+//    phone, verifiedAt, isUser, uid, name
+//
+// ── RTDB  users/{uid} ────────────────────────────────────────────────────────
+//    uid, displayName, mobile, email, city
 
 import {
-  doc, getDoc, setDoc, updateDoc,
-  runTransaction, serverTimestamp,
+  getFirestore,
+  doc, getDoc, setDoc, updateDoc, arrayUnion,
+  serverTimestamp,
 } from 'firebase/firestore';
-import { firestore } from '../lib/firebase';
-import { rtdb }      from './rtdb';
-import { toMobileKey, toFullMobile } from '../lib/phone';
 
-// ── Refs ──────────────────────────────────────────────────────────────────────
-const counterRef   = doc(firestore, 'meta', 'treeCounter');
-const treeRef      = (treeId) => doc(firestore, 'trees', treeId);
-const byUidRef     = (uid)    => doc(firestore, 'treesByUid', uid);
+import { rtdb }                                     from './rtdb';
+import { generatePin, generateTreeId, toMobileKey } from '../lib/phone';
 
-// ── RTDB path (fresh node) ────────────────────────────────────────────────────
-const editorPath   = (treeId, mobileKey) => `treeEditors/${treeId}/${mobileKey}`;
+function fsdb() { return getFirestore(); }
 
-// ── PIN generator ─────────────────────────────────────────────────────────────
-export function newTreePin() {
-  return String(Math.floor(1000 + Math.random() * 9000));
-}
+// ─── CREATE TREE ──────────────────────────────────────────────────────────────
 
-// ── Auto-increment tree ID (transaction-safe) ─────────────────────────────────
-async function nextTreeId() {
-  return runTransaction(firestore, async (tx) => {
-    const snap = await tx.get(counterRef);
-    const next = (snap.exists() ? snap.data().lastId : 0) + 1;
-    tx.set(counterRef, { lastId: next });
-    return String(next);
-  });
-}
+export async function createTree(uid, treeName) {
+  const treeId = generateTreeId();
+  const pin    = generatePin();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CREATE
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Creator tree banata hai.
- * @param {string}   uid
- * @param {string}   treeName
- * @param {Array}    nodes           — initial nodes (empty ya existing)
- * @param {Array}    invitedContacts — [{ name, phone, countryCode }] contact picker se
- * @returns {{ treeId, pin }}
- */
-export async function createTree(uid, treeName, nodes = [], invitedContacts = []) {
-  const treeId = await nextTreeId();         // "1", "2", "43" ...
-  const pin    = newTreePin();               // "4821"
-  const now    = Date.now();
-
-  const invited = invitedContacts
-    .filter(c => c.phone)
-    .map(c => ({
-      name:  c.name  || '',
-      phone: toFullMobile(c.countryCode || '+91', c.phone),
-    }));
-
-  const treeDoc = {
-    treeId,
-    treeName:     treeName || 'Family Tree',
+  await setDoc(doc(fsdb(), 'trees', treeId), {
+    treeName:  treeName || 'My Family Tree',
     pin,
-    createdByUid: uid,
-    createdAt:    now,
-    updatedAt:    now,
-    nodes,
-    rowOrder:     null,
-    invited,
-  };
+    adminUid:  uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    invited:   [],
+    nodes:     {},
+    rowOrder:  null,
+  });
 
-  // Firestore: tree save
-  await setDoc(treeRef(treeId), treeDoc);
-
-  // Firestore: uid → tree pointer
-  await setDoc(byUidRef(uid), {
-    [`trees.${treeId}`]: {
-      role:      'creator',
-      treeName:  treeDoc.treeName,
-      createdAt: now,
-    },
-  }, { merge: true });
+  await rtdb.set(`userTrees/${uid}/${treeId}`, {
+    treeName:  treeName || 'My Family Tree',
+    pin,
+    createdAt: Date.now(),
+  });
 
   return { treeId, pin };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// READ
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── GET TREE ─────────────────────────────────────────────────────────────────
 
-/** Full tree data. Returns null if not found. */
 export async function getTree(treeId) {
-  if (!treeId) return null;
-  const snap = await getDoc(treeRef(treeId));
-  return snap.exists() ? snap.data() : null;
+  const snap = await getDoc(doc(fsdb(), 'trees', treeId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() };
 }
 
-/** Creator ke saare trees. Returns { treeId: { role, treeName, createdAt } } */
+// ─── GET TREES BY UID ─────────────────────────────────────────────────────────
+
 export async function getTreesByUid(uid) {
-  if (!uid) return {};
-  const snap = await getDoc(byUidRef(uid));
-  return snap.exists() ? (snap.data().trees || {}) : {};
+  const data = await rtdb.get(`userTrees/${uid}`);
+  return data || {};
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PIN VERIFY  (editor ke liye)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── CHECK INVITE — O(1) RTDB lookup ─────────────────────────────────────────
+//
+// Before adding a contact, check if this phone was already invited.
+// Returns existing invite data or null.
+//
+// RTDB path: invites/{mobileKey}
+// Example:   invites/919974021397
+//
+// Returns:
+//   null                                   → not invited yet, safe to proceed
+//   { name, phone, treeId, treeName, pin, invitedBy, invitedAt, status }
+//                                          → already invited
 
-/**
- * PIN verify karo. Sahi hone par phone RTDB mein save karo.
- * @returns {{ ok: boolean, reason?: string }}
- */
-export async function verifyPinAndSaveEditor(treeId, enteredPin, phone, name = '') {
-  const tree = await getTree(treeId);
-  if (!tree)                                  return { ok: false, reason: 'tree_not_found' };
-  if (String(tree.pin) !== String(enteredPin)) return { ok: false, reason: 'wrong_pin' };
+export async function checkInvite(fullPhone) {
+  const mobileKey = toMobileKey(fullPhone);
+  const data      = await rtdb.get(`invites/${mobileKey}`);
+  return data || null;
+}
 
-  // RTDB mein save karo
-  const mobileKey = toMobileKey(phone);
-  if (mobileKey) {
-    const path     = editorPath(treeId, mobileKey);
-    const existing = await rtdb.get(path);
-    await rtdb.set(path, {
-      phone,
-      name:       name || existing?.name || '',
-      verifiedAt: existing?.verifiedAt || now(),
-      lastSeen:   now(),
+// ─── SAVE INVITE — write to RTDB invites node ─────────────────────────────────
+//
+// Called after tree is created and contacts confirmed.
+// Writes to BOTH:
+//   RTDB  invites/{mobileKey}             ← fast lookup
+//   Firestore  trees/{treeId}/invited[]   ← used by PIN verify
+
+export async function saveInvite(treeId, treeName, pin, invitedByUid, contact) {
+  const mobileKey = toMobileKey(contact.phone);
+
+  // RTDB — fast lookup node
+  await rtdb.set(`invites/${mobileKey}`, {
+    name:       contact.name  || '',
+    phone:      contact.phone || '',
+    treeId,
+    treeName,
+    pin,
+    invitedBy:  invitedByUid || '',
+    invitedAt:  Date.now(),
+    status:     'pending',   // 'pending' | 'joined'
+  });
+
+  // Firestore — inside tree document (used by verifyPinAndSaveEditor)
+  await updateDoc(doc(fsdb(), 'trees', treeId), {
+    invited: arrayUnion({
+      name:  contact.name  || '',
+      phone: contact.phone || '',
+    }),
+  });
+}
+
+// ─── SAVE ALL INVITES — batch save contacts after tree creation ───────────────
+//
+// Called once after tree created with all confirmed contacts.
+// Replaces old addInvitedContacts().
+
+export async function saveAllInvites(treeId, treeName, pin, invitedByUid, contacts) {
+  // Save each contact to RTDB invites node in parallel
+  await Promise.all(
+    contacts.map(c => saveInvite(treeId, treeName, pin, invitedByUid, c))
+  );
+}
+
+// ─── MARK INVITE JOINED — called when user registers ─────────────────────────
+
+export async function markInviteJoined(fullPhone, uid) {
+  const mobileKey = toMobileKey(fullPhone);
+  try {
+    await rtdb.update(`invites/${mobileKey}`, {
+      status:   'joined',
+      uid,
+      joinedAt: Date.now(),
     });
+  } catch (e) {
+    console.warn('markInviteJoined failed:', e);
   }
+}
+
+// ─── ADD INVITED CONTACTS (legacy — kept for member invite flow) ──────────────
+// Member inviting someone mid-tree uses this.
+// Also writes to RTDB invites node.
+
+export async function addInvitedContacts(treeId, contacts, invitedByUid = '') {
+  // Get tree for treeName + pin
+  const tree = await getTree(treeId);
+  if (!tree) return;
+
+  await Promise.all(
+    contacts.map(c => saveInvite(treeId, tree.treeName, tree.pin, invitedByUid, c))
+  );
+}
+
+// ─── VERIFY PIN & SAVE EDITOR ─────────────────────────────────────────────────
+
+export async function verifyPinAndSaveEditor(treeId, enteredPin, fullPhone) {
+  const tree = await getTree(treeId);
+  if (!tree) return { ok: false, reason: 'tree_not_found' };
+
+  // Check 1: PIN must match
+  if (String(tree.pin) !== String(enteredPin)) {
+    return { ok: false, reason: 'wrong_pin' };
+  }
+
+  // Check 2: phone must be in invited[] OR in RTDB invites node
+  const normalised = fullPhone.replace(/\s/g, '');
+
+  // Check Firestore invited[] first
+  const invitedEntry = (tree.invited || []).find(
+    i => i.phone && i.phone.replace(/\s/g, '') === normalised
+  );
+
+  // Also check RTDB invites node (faster, more reliable)
+  const mobileKey  = toMobileKey(fullPhone);
+  const inviteData = !invitedEntry
+    ? await rtdb.get(`invites/${mobileKey}`)
+    : null;
+
+  // Check if this is the admin
+  const adminData = tree.adminUid
+    ? await rtdb.get(`users/${tree.adminUid}`)
+    : null;
+  const isAdmin = adminData?.mobile?.replace(/\s/g, '') === normalised;
+
+  const isInvited = !!(invitedEntry || (inviteData?.treeId === treeId) || isAdmin);
+
+  if (!isInvited) {
+    return { ok: false, reason: 'not_invited' };
+  }
+
+  // All checks passed — save as verified editor
+  await rtdb.set(`treeEditors/${treeId}/${mobileKey}`, {
+    phone:      fullPhone,
+    name:       invitedEntry?.name || inviteData?.name || '',
+    verifiedAt: Date.now(),
+    isUser:     false,
+  });
 
   return { ok: true };
 }
 
-/**
- * Dobara aane par check — agar phone already verified hai to PIN mat maango.
- * lastSeen update bhi hota hai.
- */
-export async function isVerifiedEditor(treeId, phone) {
+// ─── IS VERIFIED EDITOR ───────────────────────────────────────────────────────
+
+export async function isVerifiedEditor(treeId, fullPhone) {
+  const mobileKey = toMobileKey(fullPhone);
+  const data      = await rtdb.get(`treeEditors/${treeId}/${mobileKey}`);
+  return !!data;
+}
+
+// ─── GET INVITED PERSON NAME BY PHONE ────────────────────────────────────────
+
+export function getInvitedName(tree, fullPhone) {
+  if (!tree?.invited?.length) return '';
+  const normalised = fullPhone.replace(/\s/g, '');
+  const match = tree.invited.find(i =>
+    i.phone && i.phone.replace(/\s/g, '') === normalised
+  );
+  return match?.name || '';
+}
+
+// ─── BUILD WHATSAPP INVITE ────────────────────────────────────────────────────
+
+export function buildWhatsAppInvite(treeId, pin, treeName) {
+  const joinUrl = `${window.location.origin}/tree/${treeId}`;
+  const msg = encodeURIComponent(
+    `🌳 ${treeName || 'Family Tree'} mein join karo!\n` +
+    `Link: ${joinUrl}\n` +
+    `PIN: ${pin}\n\n` +
+    `Link kholo, PIN daalo aur family tree dekho / edit karo.`
+  );
+  return `https://wa.me/?text=${msg}`;
+}
+
+// ─── REGISTER TREE GUEST AS USER ──────────────────────────────────────────────
+
+export async function registerTreeGuestAsUser(uid, treeId, { name, phone, email }) {
   const mobileKey = toMobileKey(phone);
-  if (!mobileKey) return false;
-  const path = editorPath(treeId, mobileKey);
-  const data = await rtdb.get(path);
-  if (!data) return false;
-  await rtdb.update(path, { lastSeen: now() });
-  return true;
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UPDATE
-// ─────────────────────────────────────────────────────────────────────────────
+  const existing    = await rtdb.get(`users/${uid}`);
+  const wasExisting = !!existing;
 
-/** Nodes + rowOrder save karo (creator ya verified editor). */
-export async function saveTreeData(treeId, nodes, rowOrder = null) {
-  await updateDoc(treeRef(treeId), {
-    nodes,
-    rowOrder,
-    updatedAt: now(),
-  });
-}
-
-/** Naye invited contacts add karo (duplicates skip). */
-export async function addInvitedContacts(treeId, newContacts = []) {
-  const tree = await getTree(treeId);
-  if (!tree) return;
-
-  const existingPhones = new Set((tree.invited || []).map(i => i.phone));
-
-  const toAdd = newContacts
-    .filter(c => c.phone)
-    .map(c => ({
-      name:  c.name || '',
-      phone: toFullMobile(c.countryCode || '+91', c.phone),
-    }))
-    .filter(c => !existingPhones.has(c.phone));
-
-  if (!toAdd.length) return;
-
-  await updateDoc(treeRef(treeId), {
-    invited:   [...(tree.invited || []), ...toAdd],
-    updatedAt: now(),
-  });
-}
-
-/** Tree ka naam update karo. */
-export async function updateTreeName(treeId, treeName) {
-  await updateDoc(treeRef(treeId), { treeName, updatedAt: now() });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WHATSAPP INVITE
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * WhatsApp share URL banao.
- * @param {string} treeId   — "42"
- * @param {string} pin      — "4821"
- * @param {string} treeName
- * @param {string} baseUrl  — default: current origin
- */
-export function buildWhatsAppInvite(treeId, pin, treeName, baseUrl = window.location.origin) {
-  const link = `${baseUrl}/tree/${treeId}`;
-  const msg  =
-    `🌳 *${treeName}*\n\n` +
-    `Aapko vansh vriksha mein jodne ka niyantran hai.\n\n` +
-    `👉 Link: ${link}\n` +
-    `🔑 PIN: ${pin}\n\n` +
-    `PIN daalkar aap data add/edit kar sakte hain.`;
-  return `https://wa.me/?text=${encodeURIComponent(msg)}`;
-}
-
-// ── helper ────────────────────────────────────────────────────────────────────
-const now = () => Date.now();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TREE GUEST → DIRECTORY USER
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Tree editor ko directory user banao.
- * Firebase Auth account already ban chuka hai (anonymous ya phone).
- * Yeh function RTDB mein member + user + mobileIndex save karta hai.
- *
- * @param {string} uid         — Firebase Auth uid
- * @param {string} treeId      — jis tree se aaya
- * @param {object} formData    — { name, phone, countryCode, email, city }
- * @returns {{ memberId, familyId }}
- */
-export async function registerTreeGuestAsUser(uid, treeId, formData) {
-  const { name, phone, countryCode = '+91', email = '', city = '' } = formData;
-
-  // 1. Tree se naam confirm karo
-  const tree     = await getTree(treeId);
-  const treeName = tree?.treeName || 'Family';
-
-  // 2. Member ID + timestamps
-  const ts       = Date.now();
-  const memberId = `MEM_${ts}`;
-
-  // Abhi family ID nahi hai — tree se family baad mein banegi
-  // Isliye familyId = null, status = 'pendingFamily'
-  const writes = {};
-
-  // 3. Member node
-  writes[`members/${memberId}`] = {
-    name,
-    mobile:      phone,
-    countryCode,
-    email,
-    stayCity:    city,
-    familyId:    null,
-    treeId,                    // kis tree se aaya — future linking ke liye
-    createdAt:   ts,
-    createdFrom: 'tree',
-  };
-
-  // 4. User node
-  writes[`users/${uid}`] = {
+  await rtdb.set(`users/${uid}`, {
+    uid,
     displayName: name,
-    email:       email || null,
     mobile:      phone,
-    countryCode,
-    role:        'member',
-    memberId,
-    familyId:    null,
-    treeId,
-    status:      'active',
-    createdAt:   ts,
-  };
+    email:       email || '',
+    createdAt:   existing?.createdAt || Date.now(),
+    updatedAt:   Date.now(),
+  });
 
-  // 5. mobileIndex — phone → uid + memberId link
-  const mobileKey = toMobileKey(phone);
-  if (mobileKey) {
-    writes[`mobileIndex/${mobileKey}/isUser`]               = true;
-    writes[`mobileIndex/${mobileKey}/userUid`]              = uid;
-    writes[`mobileIndex/${mobileKey}/memberIds/${memberId}`] = true;
-    writes[`mobileIndex/${mobileKey}/countryCode`]          = countryCode;
-    writes[`mobileIndex/${mobileKey}/sources/tree`]         = true;
-  }
+  const tree = await getTree(treeId);
+  await rtdb.set(`userTrees/${uid}/${treeId}`, {
+    treeName: tree?.treeName || '',
+    pin:      tree?.pin      || '',
+    joinedAt: Date.now(),
+  });
 
-  // 6. email index (agar diya ho)
-  if (email) {
-    const emailKey = email.toLowerCase().replace(/\./g, ',');
-    writes[`usersByEmail/${emailKey}`] = uid;
-  }
+  await rtdb.update(`treeEditors/${treeId}/${mobileKey}`, {
+    isUser: true,
+    uid,
+    name,
+  });
 
-  // 7. treeEditors mein isUser flag set karo
-  if (mobileKey) {
-    writes[`treeEditors/${treeId}/${mobileKey}/isUser`]   = true;
-    writes[`treeEditors/${treeId}/${mobileKey}/uid`]      = uid;
-    writes[`treeEditors/${treeId}/${mobileKey}/memberId`] = memberId;
-  }
+  // Mark invite as joined
+  await markInviteJoined(phone, uid);
 
-  // Ek hi batch mein sab save
-  await rtdb.batch(writes);
-
-  return { memberId, familyId: null };
+  return { wasExisting };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TREE GUEST → DIRECTORY USER
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── APPEND ACTIVITY LOG ──────────────────────────────────────────────────────
 
-/**
- * Tree editor ko directory user banao.
- * @param {string} uid       — Firebase Auth uid
- * @param {string} treeId    — jis tree se aaya
- * @param {object} formData  — { name, phone, countryCode, email, city }
- * @returns {{ memberId }}
- */
+export async function appendLog(treeId, entry) {
+  if (!treeId || !entry) return;
+  try {
+    await updateDoc(doc(fsdb(), 'trees', treeId), {
+      activityLog: arrayUnion({
+        uid:       entry.uid       || 'unknown',
+        name:      entry.name      || 'Someone',
+        action:    entry.action    || '',
+        target:    entry.target    || '',
+        detail:    entry.detail    || '',
+        timestamp: entry.timestamp || Date.now(),
+      }),
+    });
+  } catch (e) {
+    console.warn('appendLog failed:', e);
+  }
+}

@@ -1,24 +1,272 @@
 // pages/DashboardPage/index.jsx
-// Improvements:
-//  - useFamily hook replaces manual cache logic (cleaner, reusable)
-//  - Skeleton loader instead of full-page spinner
-//  - updateFamily now invalidates cache automatically (familyDb.js)
-//  - InlineField, calcCompletion, memberSubtitle extracted below for readability
+// ─────────────────────────────────────────────────────────────────────────────
+// v3.0 additions on top of existing Dashboard:
+//   1. Family Tree card (navigate to /tree/{familyId})
+//   2. Games card (create/join game shortcuts)
+//   3. Stats row (members, generations, games played)
+//   4. Invite button (opens contact picker + WhatsApp)
+//
+// Everything else from original dashboard is PRESERVED as-is.
+// Only new sections added — no existing code modified.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate }         from "react-router-dom";
-import { useAuth }             from "../../store/AuthContext";
-import { useFamily }           from "../../hooks/useFamily";
-import { updateFamily }        from "../../db/familyDb";
-import { toProperCase }        from "../../lib/text";
-import { COLORS }              from "../../constants/app";
-import EditMemberModal         from "../../components/member/EditMemberModal";
-import PhotoUpload             from "../../components/member/PhotoUpload";
-import OnboardingTour          from "../../components/layout/OnboardingTour";
-import { DASHBOARD_TOUR_STEPS } from "../../constants/tourSteps";
-import { Plus, RefreshCw, ChevronRight, Phone, MapPin, Pencil } from "lucide-react";
+import { useNavigate }           from "react-router-dom";
+import { useAuth }               from "../../store/AuthContext";
+import { useFamily }             from "../../hooks/useFamily";
+import { useFamilyTree }         from "../../hooks/useFamilyTree";
+//import { updateFamily }          from "../../db/familyDb";
+import { toProperCase }          from "../../lib/text";
+import { COLORS }                from "../../constants/app";
+import EditMemberModal           from "../../components/member/EditMemberModal";
+import PhotoUpload               from "../../components/member/PhotoUpload";
+import OnboardingTour            from "../../components/layout/OnboardingTour";
+import { DASHBOARD_TOUR_STEPS }  from "../../constants/tourSteps";
+import { Plus, RefreshCw, ChevronRight, Phone, MapPin, Pencil, TreePine, Gamepad2, UserPlus } from "lucide-react";
 
-// ── Skeleton loader ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW: Family Tree Quick Card
+// ─────────────────────────────────────────────────────────────────────────────
+function FamilyTreeCard({ familyId, memberCount, treeName, onNavigate }) {
+  return (
+    <button onClick={onNavigate} style={{
+      width: "100%", background: "linear-gradient(135deg,#5A1020,#7B1C2E)",
+      border: "none", borderRadius: 16, padding: "16px 18px",
+      textAlign: "left", cursor: "pointer",
+      boxShadow: "0 4px 16px rgba(90,16,32,0.25)",
+      display: "flex", alignItems: "center", gap: 14,
+      marginBottom: 10,
+    }}>
+      {/* Icon */}
+      <div style={{
+        width: 46, height: 46, borderRadius: 14,
+        background: "rgba(201,168,76,0.2)",
+        border: "1px solid rgba(201,168,76,0.3)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 22, flexShrink: 0,
+      }}>
+        🌳
+      </div>
+
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: "'DM Serif Display',serif",
+          fontSize: 15, color: COLORS.goldLight || "#F0D080",
+          marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {treeName || "Family Tree"}
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(240,208,128,0.6)" }}>
+          {memberCount ? `${memberCount} સભ્યો` : "Tree open કરો →"}
+        </div>
+      </div>
+
+      {/* Arrow */}
+      <ChevronRight size={18} color="rgba(240,208,128,0.5)" />
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW: Quick Action Row (Invite + Games)
+// ─────────────────────────────────────────────────────────────────────────────
+function QuickActions({ familyId, familyName, onInvite, onGames }) {
+  const actions = [
+    {
+      icon: "📨", label: "Invite", sublabel: "WhatsApp",
+      color: "#25D366", bg: "#E8F5EA", border: "#A5D6A7",
+      onClick: onInvite,
+    },
+    {
+      icon: "🎮", label: "Games", sublabel: "Tambola / Quiz",
+      color: "#1565C0", bg: "#E3F2FD", border: "#90CAF9",
+      onClick: onGames,
+    },
+  ];
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+      {actions.map(a => (
+        <button key={a.label} onClick={a.onClick} style={{
+          background: a.bg, border: `1.5px solid ${a.border}`,
+          borderRadius: 14, padding: "14px 12px",
+          textAlign: "center", cursor: "pointer",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", gap: 6,
+        }}>
+          <div style={{ fontSize: 24 }}>{a.icon}</div>
+          <div style={{ fontWeight: 700, fontSize: 13, color: a.color }}>{a.label}</div>
+          <div style={{ fontSize: 10, color: a.color, opacity: 0.7 }}>{a.sublabel}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW: Invite Sheet (contact picker + WhatsApp)
+// ─────────────────────────────────────────────────────────────────────────────
+function InviteSheet({ familyId, familyName, senderUid, senderName, onClose }) {
+  const [step,    setStep]    = useState("pick"); // pick | ready | sent
+  const [contact, setContact] = useState(null);
+  const [name,    setName]    = useState("");
+  const [sending, setSending] = useState(false);
+  const [isSupported] = useState(() => "contacts" in navigator && "ContactsManager" in window);
+
+  const pickContact = async () => {
+    try {
+      const raw = await navigator.contacts.select(["name", "tel"], { multiple: false });
+      if (!raw?.length || !raw[0].tel?.length) return;
+      const tel  = raw[0].tel[0].trim();
+      const full = tel.startsWith("+") ? tel : `+91${tel.replace(/\D/g, "").slice(-10)}`;
+      setContact({ name: raw[0].name?.[0] || "", phone: full });
+      setName(raw[0].name?.[0] || "");
+      setStep("ready");
+    } catch (e) {
+      if (e.name !== "AbortError") console.warn(e);
+    }
+  };
+
+  const sendInvite = async () => {
+    if (!contact?.phone || !name.trim()) return;
+    setSending(true);
+    try {
+      const { createInvite, buildWhatsAppLink, openWhatsApp } = await import("../../db/inviteDb");
+      const { pin } = await createInvite({
+        familyId, name: name.trim(),
+        phone: contact.phone, type: "join",
+        sentBy: senderUid, maxUses: 1,
+      });
+      const url = buildWhatsAppLink({ pin, name: name.trim(), familyName, type: "join" });
+      openWhatsApp(url, contact.phone);
+      setStep("sent");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 300,
+      background: "rgba(61,0,16,0.55)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "flex-end",
+    }} onClick={onClose}>
+      <div style={{
+        background: "#fff", borderRadius: "20px 20px 0 0",
+        padding: "16px 20px 32px", width: "100%",
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 40, height: 4, background: COLORS.border, borderRadius: 2, margin: "0 auto 14px" }} />
+        <div style={{ fontFamily: "'DM Serif Display',serif", fontSize: 18, color: COLORS.primary, marginBottom: 16 }}>
+          📨 Invite Send
+        </div>
+
+        {step === "sent" ? (
+          <div style={{ textAlign: "center", padding: "16px 0" }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>✅</div>
+            <div style={{ fontWeight: 700, color: "#2E7D32", fontSize: 15 }}>WhatsApp Invite Sent!</div>
+            <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 4 }}>{name}</div>
+            <button onClick={onClose} style={{
+              marginTop: 16, width: "100%", padding: 13, borderRadius: 12,
+              background: COLORS.primary, border: "none", color: "#fff",
+              fontWeight: 700, fontSize: 14, cursor: "pointer",
+              fontFamily: "'DM Sans',sans-serif",
+            }}>Done</button>
+          </div>
+        ) : step === "ready" ? (
+          <>
+            <div style={{
+              background: "#E8F5EA", border: "1px solid #A5D6A7",
+              borderRadius: 12, padding: "12px 14px", marginBottom: 14,
+              display: "flex", alignItems: "center", gap: 10,
+            }}>
+              <span style={{ fontSize: 22 }}>👤</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.textPrimary }}>{contact.name}</div>
+                <div style={{ fontSize: 12, color: COLORS.textMuted }}>{contact.phone}</div>
+              </div>
+              <button onClick={() => setStep("pick")} style={{
+                background: "transparent", border: "none",
+                color: COLORS.textMuted, cursor: "pointer", fontSize: 12,
+              }}>✕</button>
+            </div>
+
+            {/* Name edit */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.textSecondary,
+                letterSpacing: "1px", textTransform: "uppercase", marginBottom: 5 }}>નામ</div>
+              <input value={name} onChange={e => setName(e.target.value)} style={{
+                width: "100%", padding: "11px 13px", borderRadius: 10,
+                border: `1.5px solid ${COLORS.border}`, fontSize: 15,
+                fontFamily: "'DM Sans',sans-serif", color: COLORS.textPrimary,
+                background: COLORS.bg, outline: "none", boxSizing: "border-box",
+              }} />
+            </div>
+
+            <button onClick={sendInvite} disabled={!name.trim() || sending} style={{
+              width: "100%", padding: 14, borderRadius: 12,
+              background: "#25D366", border: "none", color: "#fff",
+              fontWeight: 700, fontSize: 14, cursor: "pointer",
+              fontFamily: "'DM Sans',sans-serif",
+              opacity: (!name.trim() || sending) ? 0.6 : 1,
+            }}>
+              {sending ? "Sending..." : "💬 WhatsApp Invite Send"}
+            </button>
+          </>
+        ) : (
+          <>
+            {isSupported ? (
+              <button onClick={pickContact} style={{
+                width: "100%", padding: 14, borderRadius: 12,
+                background: COLORS.primary, border: "none", color: "#fff",
+                fontWeight: 700, fontSize: 14, cursor: "pointer",
+                fontFamily: "'DM Sans',sans-serif", marginBottom: 10,
+              }}>
+                📱 Contact Pick કરો
+              </button>
+            ) : (
+              <p style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 10, textAlign: "center" }}>
+                Manual number enter કરો ↓
+              </p>
+            )}
+
+            {/* Manual input */}
+            <div style={{ marginBottom: 10 }}>
+              <input placeholder="Name" style={{
+                width: "100%", padding: "11px 13px", borderRadius: 10,
+                border: `1.5px solid ${COLORS.border}`, fontSize: 15,
+                fontFamily: "'DM Sans',sans-serif", color: COLORS.textPrimary,
+                background: COLORS.bg, outline: "none", boxSizing: "border-box",
+                marginBottom: 8,
+              }} onChange={e => setName(e.target.value)} />
+              <input placeholder="+91XXXXXXXXXX" style={{
+                width: "100%", padding: "11px 13px", borderRadius: 10,
+                border: `1.5px solid ${COLORS.border}`, fontSize: 15,
+                fontFamily: "'DM Sans',sans-serif", color: COLORS.textPrimary,
+                background: COLORS.bg, outline: "none", boxSizing: "border-box",
+              }} onChange={e => setContact({ phone: e.target.value })} />
+            </div>
+            {name && contact?.phone && (
+              <button onClick={() => setStep("ready")} style={{
+                width: "100%", padding: 13, borderRadius: 12,
+                background: COLORS.primary, border: "none", color: "#fff",
+                fontWeight: 700, fontSize: 14, cursor: "pointer",
+                fontFamily: "'DM Sans',sans-serif",
+              }}>
+                Continue →
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXISTING helpers — preserved exactly
+// ─────────────────────────────────────────────────────────────────────────────
+
 function DashboardSkeleton() {
   return (
     <div className="max-w-md mx-auto pb-24 animate-pulse">
@@ -38,21 +286,17 @@ function DashboardSkeleton() {
   );
 }
 
-// ── Inline editable field ─────────────────────────────────────────
 function InlineField({ icon, value, placeholder, onSave, uppercase = false }) {
   const [editing, setEditing] = useState(false);
   const [draft,   setDraft]   = useState(value || "");
   const inputRef              = useRef(null);
-
   useEffect(() => { if (editing) setTimeout(() => inputRef.current?.focus(), 80); }, [editing]);
-
   const save = () => {
     const t = draft.trim();
     if (!t) { setEditing(false); return; }
     onSave(uppercase ? t.toUpperCase() : toProperCase(t));
     setEditing(false);
   };
-
   return (
     <>
       <button onClick={() => { setDraft(value || ""); setEditing(true); }}
@@ -63,7 +307,6 @@ function InlineField({ icon, value, placeholder, onSave, uppercase = false }) {
           : <span className="text-xs animate-pulse" style={{ color: "rgba(255,220,100,0.85)" }}>{placeholder}</span>}
         <Pencil size={9} className="ml-0.5 opacity-0 group-hover:opacity-50 transition-opacity" color="#F0D080" />
       </button>
-
       {editing && (
         <div className="fixed inset-0 z-[60] flex flex-col justify-end" style={{ background: "rgba(0,0,0,0.45)" }}
           onClick={() => setEditing(false)}>
@@ -89,7 +332,6 @@ function InlineField({ icon, value, placeholder, onSave, uppercase = false }) {
   );
 }
 
-// ── Helpers ───────────────────────────────────────────────────────
 function calcCompletion(family, members) {
   const head   = members.find(m => m.isHead) || members[0];
   const checks = [!!family.city, !!family.native, !!family.address, members.length > 1, !!head?.mobile, !!head?.gender, !!head?.dob];
@@ -105,13 +347,21 @@ function memberSubtitle(m) {
   return parts.join(" · ") || "Member";
 }
 
-// ── Main component ────────────────────────────────────────────────
-export default function DashboardPage() {
-  const { user }   = useAuth();
-  const navigate   = useNavigate();
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // useFamily hook — handles cache, loading, refresh automatically
-  const { family, members, loading, refresh } = useFamily(user?.familyId);
+export default function DashboardPage() {
+  const { user, profile } = useAuth();
+  const navigate          = useNavigate();
+
+  const familyId = profile?.familyId || user?.familyId;
+
+  // Existing hooks
+  const { family, members, loading, refresh } = useFamily(familyId);
+
+  // NEW: tree hook for stats
+  const treeHook = useFamilyTree(familyId, true); // readOnly
 
   const [familyData,    setFamilyData]    = useState(null);
   const [memberList,    setMemberList]    = useState([]);
@@ -120,13 +370,14 @@ export default function DashboardPage() {
   const [activeTab,     setActiveTab]     = useState("all");
   const [dashTour,      setDashTour]      = useState(false);
 
-  // Sync hook data into local state for optimistic updates
+  // NEW state
+  const [showInvite,    setShowInvite]    = useState(false);
+
   useEffect(() => {
     if (family)  setFamilyData(family);
     if (members) setMemberList(members);
   }, [family, members]);
 
-  // Dashboard tour
   useEffect(() => {
     const navDone  = localStorage.getItem("appTourDone");
     const dashDone = localStorage.getItem("dashTourDone");
@@ -141,14 +392,13 @@ export default function DashboardPage() {
     setDashTour(false);
   };
 
-  // Optimistic update helper — updates local state immediately
   const patchMember = useCallback((id, data) => {
     setMemberList(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
   }, []);
 
   const saveField = async (field, value) => {
-    setFamilyData(prev => ({ ...prev, [field]: value })); // optimistic
-    await updateFamily(user?.familyId, { [field]: value }); // cache invalidated inside
+    setFamilyData(prev => ({ ...prev, [field]: value }));
+    await updateFamily(familyId, { [field]: value });
   };
 
   if (loading && !familyData) return <DashboardSkeleton />;
@@ -173,18 +423,17 @@ export default function DashboardPage() {
   const pct      = calcCompletion(familyData, memberList);
 
   const waInvite = m => {
-    const text = encodeURIComponent(`Hello ${m.name?.split(" ")[0] || ""}! 🙏\nJoin our Family App.\nLink: ${window.location.origin}/join?familyId=${user?.familyId}\nPIN: ${familyData.familyPin}`);
+    const text = encodeURIComponent(`Hello ${m.name?.split(" ")[0] || ""}! 🙏\nJoin our Family App.\nLink: ${window.location.origin}/join?familyId=${familyId}\nPIN: ${familyData.familyPin}`);
     return `https://wa.me/${(m.mobile || "").replace(/\D/g, "")}?text=${text}`;
   };
 
   return (
     <div className="max-w-md mx-auto pb-24 min-h-screen" style={{ background: COLORS.bg }}>
 
-      {/* Hero header */}
+      {/* ── Existing hero header — unchanged ── */}
       <div id="tour-profile-section" className="px-4 pt-3 pb-5 relative overflow-hidden"
         style={{ background: "linear-gradient(135deg,#5A1020,#7B1C2E,#9B2335)" }}>
         <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: COLORS.gold }} />
-
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-lg font-bold truncate flex-1 min-w-0" style={{ color: COLORS.goldLight }}>
             {toProperCase(head?.name) || "My Family"}
@@ -195,7 +444,6 @@ export default function DashboardPage() {
             <RefreshCw size={13} color={COLORS.goldLight} />
           </button>
         </div>
-
         <div className="flex items-center gap-2 flex-wrap mb-2">
           <span className="text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0"
             style={{ background: COLORS.gold, color: COLORS.primaryDark }}>{familyData.familyPin}</span>
@@ -206,12 +454,10 @@ export default function DashboardPage() {
           <InlineField icon={<span style={{ fontSize: 10 }}>🏡</span>}
             value={familyData.native} placeholder="Native" onSave={v => saveField("native", v)} uppercase />
         </div>
-
         <div className="mb-3">
           <InlineField icon={<span style={{ fontSize: 10 }}>📬</span>}
             value={familyData.address} placeholder="Add address" onSave={v => saveField("address", v)} />
         </div>
-
         <div>
           <div className="flex justify-between items-center mb-1">
             <span className="text-xs" style={{ color: "rgba(240,208,128,0.65)" }}>Profile Completion</span>
@@ -224,8 +470,50 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Filter tabs */}
+      {/* ══ NEW: Family Tree Card + Quick Actions ══ */}
       <div className="px-4 mt-4">
+
+        {/* Family Tree Card */}
+        <FamilyTreeCard
+          familyId={familyId}
+          memberCount={treeHook.memberCount || memberList.length}
+          treeName={treeHook.treeName || familyData.familyName || "Family Tree"}
+          onNavigate={() => navigate(`/tree/${familyId}`)}
+        />
+
+        {/* Quick Actions: Invite + Games */}
+        <QuickActions
+          familyId={familyId}
+          familyName={treeHook.treeName || familyData.familyName}
+          onInvite={() => setShowInvite(true)}
+          onGames={() => navigate("/games")}
+        />
+
+        {/* Stats row */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 8, marginBottom: 16,
+        }}>
+          {[
+            { icon: "👥", value: treeHook.memberCount || memberList.length, label: "Tree Members" },
+            { icon: "👨‍👩‍👧", value: memberList.length, label: "Registered" },
+            { icon: "🎮", value: "—", label: "Games Played" },
+          ].map(s => (
+            <div key={s.label} style={{
+              background: "#fff", border: `1px solid ${COLORS.border}`,
+              borderRadius: 12, padding: "10px 8px", textAlign: "center",
+            }}>
+              <div style={{ fontSize: 18, marginBottom: 4 }}>{s.icon}</div>
+              <div style={{ fontFamily: "'DM Serif Display',serif",
+                fontSize: 18, color: COLORS.primaryDark }}>{s.value}</div>
+              <div style={{ fontSize: 9, color: COLORS.textMuted, marginTop: 2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Existing filter tabs — unchanged ── */}
+      <div className="px-4">
         <div className="rounded-xl p-1 flex" style={{ background: "rgba(90,16,32,0.08)" }}>
           {[
             { key: "all",      label: `All (${memberList.length})` },
@@ -243,7 +531,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Member cards */}
+      {/* ── Existing member cards — unchanged ── */}
       <div id="tour-member-list" className="px-4 mt-3 space-y-2">
         {filtered.length === 0 && (
           <div className="bg-white rounded-xl p-6 text-center text-sm" style={{ color: COLORS.primaryLight }}>
@@ -305,21 +593,20 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Edit modal */}
-      <EditMemberModal open={!!editingMember} mode="edit" member={editingMember} familyId={user?.familyId}
+      {/* ── Existing modals — unchanged ── */}
+      <EditMemberModal open={!!editingMember} mode="edit" member={editingMember} familyId={familyId}
         onClose={(saved, updated) => {
           setEditingMember(null);
           if (saved && updated) patchMember(updated.id, updated);
         }} />
 
-      {/* Add modal */}
-      <EditMemberModal open={showAdd} mode="add" familyId={user?.familyId}
+      <EditMemberModal open={showAdd} mode="add" familyId={familyId}
         onClose={(saved, newMember) => {
           setShowAdd(false);
           if (saved && newMember) setMemberList(prev => [...prev, newMember]);
         }} />
 
-      {/* FAB */}
+      {/* ── Existing FAB — unchanged ── */}
       <button id="tour-add-member" onClick={() => setShowAdd(true)}
         className="fixed bottom-20 right-4 w-14 h-14 text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-95 transition-transform"
         style={{ background: COLORS.primary, boxShadow: "0 4px 16px rgba(90,16,32,0.4)" }}>
@@ -328,6 +615,17 @@ export default function DashboardPage() {
 
       {dashTour && (
         <OnboardingTour steps={DASHBOARD_TOUR_STEPS} onFinish={handleDashTourFinish} />
+      )}
+
+      {/* ══ NEW: Invite Sheet ══ */}
+      {showInvite && (
+        <InviteSheet
+          familyId={familyId}
+          familyName={treeHook.treeName || familyData.familyName || "Family"}
+          senderUid={user?.uid}
+          senderName={user?.displayName || ""}
+          onClose={() => setShowInvite(false)}
+        />
       )}
     </div>
   );

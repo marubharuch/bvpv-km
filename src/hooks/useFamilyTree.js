@@ -1,264 +1,398 @@
 // hooks/useFamilyTree.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Ab yeh hook treeId-based hai (uid-based nahi).
-// Firestore: trees/{treeId}  (treeDb.js ke through)
-// localStorage: fast local cache
-// ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getTree, saveTreeData } from '../db/treeDb'; // treeDb.js ke functions
+import {
+  getFirestore,
+  doc, onSnapshot, updateDoc, serverTimestamp,
+} from 'firebase/firestore';
+import { appendLog } from '../db/treeDb';
 
-const lsKey     = (treeId) => `vt_nodes_${treeId}`;
-const lsMetaKey = (treeId) => `vt_meta_${treeId}`;
+const HISTORY_LIMIT = 20;
 
-const lsLoad = (treeId) => {
-  try { const r = localStorage.getItem(lsKey(treeId));     return r ? JSON.parse(r) : null; } catch { return null; }
-};
-const lsLoadMeta = (treeId) => {
-  try { const r = localStorage.getItem(lsMetaKey(treeId)); return r ? JSON.parse(r) : {};   } catch { return {}; }
-};
-const lsSave = (treeId, nodes, meta) => {
-  try {
-    localStorage.setItem(lsKey(treeId),     JSON.stringify(nodes));
-    localStorage.setItem(lsMetaKey(treeId), JSON.stringify(meta));
-  } catch {}
-};
-const lsClear = (treeId) => {
-  try {
-    localStorage.removeItem(lsKey(treeId));
-    localStorage.removeItem(lsMetaKey(treeId));
-  } catch {}
-};
-
-function makeIdGen(startFrom = 1) {
-  let n = startFrom;
-  return () => n++;
+function makeId() {
+  return `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/**
- * @param {string}  treeId   — Firestore trees/{treeId}
- * @param {boolean} readOnly — viewer mode mein true, koi save nahi
- */
+function treeDocRef(treeId) {
+  return doc(getFirestore(), 'trees', treeId);
+}
+
+function parseNames(raw) {
+  return raw.trim().split(/\s+/).filter(Boolean);
+}
+
+function buildInitialNodes(raw) {
+  const names = parseNames(raw);
+  if (!names.length) return {};
+  const nodes = names.map((name, i) => ({
+    id: makeId(), name,
+    gen: i + 1,
+    spouseOf: null, ancestorId: null,
+    descendants: [], siblings: [],
+    isYoungest: i === 0,
+  }));
+  for (let i = 0; i < nodes.length - 1; i++) {
+    nodes[i].ancestorId = nodes[i + 1].id;
+    nodes[i + 1].descendants.push(nodes[i].id);
+  }
+  const map = {};
+  nodes.forEach(n => { map[n.id] = n; });
+  return map;
+}
+
+function mapToArray(nodesMap) {
+  if (!nodesMap) return [];
+  return Object.values(nodesMap).map(n => ({
+    ...n,
+    descendants: n.descendants || [],
+    siblings:    n.siblings    || [],
+  }));
+}
+
 export function useFamilyTree(treeId, readOnly = false) {
-  const [nodes,    setNodes]    = useState([]);
-  const [treeName, setTreeName] = useState('Family Tree');
-  const [rowOrder, setRowOrder] = useState(null);
-  const [loading,  setLoading]  = useState(true);
-  const [saving,   setSaving]   = useState(false);
-  const [initDone, setInitDone] = useState(false);
+  const [nodes,       setNodes]       = useState([]);
+  const [nodesMap,    setNodesMap]    = useState({});
+  const [treeName,    setTreeName]    = useState('Family Tree');
+  const [rowOrder,    setRowOrder]    = useState(null);
+  const [activityLog, setActivityLog] = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [initDone,    setInitDone]    = useState(false);
 
-  const nextId      = useRef(makeIdGen(1));
-  const saveTimer   = useRef(null);
-  const treeNameRef = useRef('Family Tree');
-  const rowOrderRef = useRef(null);
-  const nodesRef    = useRef([]);
+  // ── Undo/Redo history stack ──────────────────────────────────────────────
+  // Each entry is a snapshot of nodesMap before a change
+  const historyRef  = useRef([]);   // past states  [oldest … newest]
+  const futureRef   = useRef([]);   // redo states   [newest … oldest]
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
-  useEffect(() => { treeNameRef.current = treeName; }, [treeName]);
-  useEffect(() => { rowOrderRef.current = rowOrder; }, [rowOrder]);
-  useEffect(() => { nodesRef.current    = nodes;    }, [nodes]);
+  const syncUndoRedoFlags = () => {
+    setCanUndo(historyRef.current.length > 0);
+    setCanRedo(futureRef.current.length > 0);
+  };
 
-  // ── persist ─────────────────────────────────────────────────────────────────
-  // persist — sirf localStorage (fast, har node change par)
-  const persist = useCallback((newNodes, name, order) => {
-    if (readOnly) return;
-    const meta    = { treeName: name, rowOrder: order ?? null };
-    const saveKey = treeId || '__new__';
-    lsSave(saveKey, newNodes, meta);
-  }, [treeId, readOnly]);
+  const pushHistory = (snapshot) => {
+    historyRef.current = [...historyRef.current, snapshot].slice(-HISTORY_LIMIT);
+    futureRef.current  = [];   // new action clears redo stack
+    syncUndoRedoFlags();
+  };
 
-  // persistFirestore — explicit save (sirf "Table View" button par)
-  const persistFirestore = useCallback(async (newNodes, name, order) => {
-    if (readOnly || !treeId) return;
-    setSaving(true);
-    try { await saveTreeData(treeId, newNodes, order ?? null); }
-    catch (e) { console.error('Firestore save failed:', e); }
-    finally   { setSaving(false); }
-  }, [treeId, readOnly]);
+  const editorRef  = useRef({ uid: 'unknown', name: 'Someone' });
+  const saveTimer  = useRef(null);
 
-  // ── Mount: load ──────────────────────────────────────────────────────────────
+  // ── Real-time listener ───────────────────────────────────────────────────
   useEffect(() => {
     if (!treeId) { setLoading(false); return; }
 
-    // localStorage first (instant)
-    const ls   = lsLoad(treeId);
-    const meta = lsLoadMeta(treeId);
-    if (ls && ls.length > 0) {
-      const maxId = Math.max(...ls.map(n => n.id), 0);
-      nextId.current = makeIdGen(maxId + 1);
-      setNodes(ls);
-      if (meta.treeName) setTreeName(meta.treeName);
-      if (meta.rowOrder) setRowOrder(meta.rowOrder);
-      setInitDone(true);
-      setLoading(false);
-      return;
-    }
+    const unsub = onSnapshot(
+      treeDocRef(treeId),
+      (snap) => {
+        if (!snap.exists()) { setLoading(false); return; }
+        const data = snap.data();
 
-    // Firestore fallback
-    getTree(treeId)
-      .then(data => {
-        if (!data) return;
-        const nodeList = data.nodes || [];
-        if (nodeList.length > 0) {
-          const maxId = Math.max(...nodeList.map(n => n.id), 0);
-          nextId.current = makeIdGen(maxId + 1);
+        if (data.nodes && Object.keys(data.nodes).length > 0) {
+          setNodesMap(data.nodes);
+          setNodes(mapToArray(data.nodes));
+          setInitDone(true);
+        } else {
+          setNodesMap({});
+          setNodes([]);
+          setInitDone(false);
         }
-        setNodes(nodeList);
-        const name = data.treeName || 'Family Tree';
-        setTreeName(name);
-        if (data.rowOrder) setRowOrder(data.rowOrder);
-        lsSave(treeId, nodeList, { treeName: name, rowOrder: data.rowOrder || null });
-        setInitDone(true);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+        if (data.treeName)    setTreeName(data.treeName);
+        if (data.rowOrder)    setRowOrder(data.rowOrder);
+        if (data.activityLog) setActivityLog(
+          [...(data.activityLog || [])].sort((a, b) => b.timestamp - a.timestamp)
+        );
+        setLoading(false);
+      },
+      (err) => {
+        console.error('useFamilyTree snapshot error:', err);
+        setLoading(false);
+      }
+    );
+
+    return () => unsub();
   }, [treeId]);
 
-  // ── mutate ───────────────────────────────────────────────────────────────────
-  const mutate = useCallback((updater) => {
-    if (readOnly) return;
-    setNodes(prev => {
-      const next = updater(prev, nextId.current);
-      persist(next, treeNameRef.current, rowOrderRef.current);
+  const setEditor = useCallback((uid, name) => {
+    editorRef.current = { uid: uid || 'unknown', name: name || 'Someone' };
+  }, []);
+
+  // ── Debounced save ───────────────────────────────────────────────────────
+  const saveNodesMap = useCallback((updatedMap) => {
+    if (readOnly || !treeId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaving(true);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await updateDoc(treeDocRef(treeId), {
+          nodes:     updatedMap,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.error('useFamilyTree save error:', e);
+      } finally {
+        setSaving(false);
+      }
+    }, 800);
+  }, [treeId, readOnly]);
+
+  // ── applyUpdate — records history before every change ────────────────────
+  const applyUpdate = useCallback((updaterFn, logEntry) => {
+    setNodesMap(prevMap => {
+      // Save snapshot BEFORE change
+      pushHistory({ ...prevMap });
+
+      const updatedMap = updaterFn({ ...prevMap });
+      setNodes(mapToArray(updatedMap));
+      saveNodesMap(updatedMap);
+      return updatedMap;
+    });
+
+    if (logEntry && treeId) {
+      appendLog(treeId, {
+        uid:       editorRef.current.uid,
+        name:      editorRef.current.name,
+        action:    logEntry.action,
+        target:    logEntry.target  || '',
+        detail:    logEntry.detail  || '',
+        timestamp: Date.now(),
+      });
+    }
+  }, [saveNodesMap, treeId]);
+
+  // ── undo ─────────────────────────────────────────────────────────────────
+  const undo = useCallback(() => {
+    if (historyRef.current.length === 0) return;
+    setNodesMap(prevMap => {
+      const prev = historyRef.current[historyRef.current.length - 1];
+      historyRef.current = historyRef.current.slice(0, -1);
+      futureRef.current  = [{ ...prevMap }, ...futureRef.current].slice(0, HISTORY_LIMIT);
+      syncUndoRedoFlags();
+      setNodes(mapToArray(prev));
+      saveNodesMap(prev);
+      return prev;
+    });
+  }, [saveNodesMap]);
+
+  // ── redo ─────────────────────────────────────────────────────────────────
+  const redo = useCallback(() => {
+    if (futureRef.current.length === 0) return;
+    setNodesMap(prevMap => {
+      const next = futureRef.current[0];
+      futureRef.current  = futureRef.current.slice(1);
+      historyRef.current = [...historyRef.current, { ...prevMap }].slice(-HISTORY_LIMIT);
+      syncUndoRedoFlags();
+      setNodes(mapToArray(next));
+      saveNodesMap(next);
       return next;
     });
-  }, [persist, readOnly]);
+  }, [saveNodesMap]);
 
-  // ── saveRowOrder ─────────────────────────────────────────────────────────────
-  const saveRowOrder = useCallback(async (order) => {
-    if (readOnly) return;
-    setRowOrder(order);
-    rowOrderRef.current = order;
-    persist(nodesRef.current, treeNameRef.current, order);
-    // rowOrder save = explicit action — Firestore bhi update karo
-    await persistFirestore(nodesRef.current, treeNameRef.current, order);
-  }, [persist, persistFirestore, readOnly]);
-
-  const resetRowOrder = useCallback(async () => {
-    if (readOnly) return;
-    setRowOrder(null);
-    rowOrderRef.current = null;
-    persist(nodesRef.current, treeNameRef.current, null);
-    await persistFirestore(nodesRef.current, treeNameRef.current, null);
-  }, [persist, persistFirestore, readOnly]);
-
-  // ── addSpouse ────────────────────────────────────────────────────────────────
-  const addSpouse = useCallback((pid, name) => {
-    mutate((prev, getId) => {
-      const p = prev.find(n => n.id === pid);
-      if (!p) return prev;
-      return [...prev, {
-        id: getId(), name, gen: p.gen,
-        ancestorId: null, spouseOf: pid, descendants: [], siblings: [],
-      }];
-    });
-  }, [mutate]);
-
-  // ── addSibling ───────────────────────────────────────────────────────────────
-  const addSibling = useCallback((pid, name) => {
-    mutate((prev, getId) => {
-      const p = prev.find(n => n.id === pid);
-      if (!p) return prev;
-      const sid = getId();
-      const trueParentId = p.ancestorId
-        || prev.find(n => !n.spouseOf && (n.descendants || []).includes(pid))?.id
-        || null;
-      return [
-        ...prev.map(n => {
-          if (n.id === pid)          return { ...n, siblings: [...n.siblings, sid] };
-          if (n.id === trueParentId) return { ...n, descendants: [...(n.descendants || []), sid] };
-          return n;
-        }),
-        { id: sid, name, gen: p.gen, ancestorId: trueParentId, spouseOf: null, descendants: [], siblings: [] },
-      ];
-    });
-  }, [mutate]);
-
-  // ── addChild ─────────────────────────────────────────────────────────────────
-  const addChild = useCallback((pid, name) => {
-    mutate((prev, getId) => {
-      const p = prev.find(n => n.id === pid);
-      if (!p) return prev;
-      let cg   = p.gen - 1;
-      let base = prev;
-      if (cg < 1) { base = prev.map(n => ({ ...n, gen: n.gen + 1 })); cg = 1; }
-      const cid = getId();
-      return [
-        ...base.map(n => n.id === pid ? { ...n, descendants: [...(n.descendants || []), cid] } : n),
-        { id: cid, name, gen: cg, ancestorId: pid, spouseOf: null, descendants: [], siblings: [] },
-      ];
-    });
-  }, [mutate]);
-
-  // ── addAncestor ──────────────────────────────────────────────────────────────
-  const addAncestor = useCallback((pid, name) => {
-    if (!name?.trim()) return;
-    mutate((prev, getId) => {
-      const p = prev.find(n => n.id === pid);
-      if (!p) return prev;
-      const aid        = getId();
-      const newGen     = p.gen + 1;
-      const siblingIds = new Set(p.siblings || []);
-      const updated    = prev.map(n => {
-        if (n.id === pid) return { ...n, ancestorId: aid };
-        if (siblingIds.has(n.id) && (n.ancestorId === p.ancestorId || n.ancestorId === null))
-          return { ...n, ancestorId: aid };
-        return n;
-      });
-      const newDescendants = [pid, ...Array.from(siblingIds).filter(sid => {
-        const s = prev.find(n => n.id === sid);
-        return s && (s.ancestorId === p.ancestorId || s.ancestorId === null);
-      })];
-      return [...updated, {
-        id: aid, name: name.trim(), gen: newGen,
-        ancestorId: null, spouseOf: null,
-        descendants: newDescendants, siblings: [],
-      }];
-    });
-  }, [mutate]);
-
-  // ── initTree (creator pehli baar names deta hai) ─────────────────────────────
-  const initTree = useCallback((rawInput) => {
-    const names = rawInput.trim().split(/\s+/).filter(Boolean);
-    if (!names.length) return;
-    nextId.current = makeIdGen(1);
-    const getId    = () => nextId.current();
-    const newNodes = names.map((name, i) => ({
-      id: getId(), name, gen: i + 1,
-      ancestorId: null, spouseOf: null,
-      descendants: [], siblings: [],
-      isYoungest: i === 0,
-    }));
-    for (let i = 0; i < newNodes.length - 1; i++) {
-      newNodes[i].ancestorId = newNodes[i + 1].id;
-      newNodes[i + 1].descendants.push(newNodes[i].id);
-    }
-    const name = names[0] + "'s Family Tree";
-    setTreeName(name);
-    setNodes(newNodes);
-    setRowOrder(null);
-    rowOrderRef.current = null;
+  // ── initTree ─────────────────────────────────────────────────────────────
+  const initTree = useCallback(async (raw) => {
+    if (!treeId) return;
+    const initialMap = buildInitialNodes(raw);
+    setNodesMap(initialMap);
+    setNodes(mapToArray(initialMap));
     setInitDone(true);
-    persist(newNodes, name, null);
-  }, [persist]);
+    setSaving(true);
+    // Clear history on fresh init
+    historyRef.current = [];
+    futureRef.current  = [];
+    syncUndoRedoFlags();
+    try {
+      await updateDoc(treeDocRef(treeId), {
+        nodes:     initialMap,
+        updatedAt: serverTimestamp(),
+      });
+      await appendLog(treeId, {
+        uid:       editorRef.current.uid,
+        name:      editorRef.current.name,
+        action:    'initTree',
+        target:    raw.trim(),
+        detail:    `${editorRef.current.name} ne tree start kiya: "${raw.trim()}"`,
+        timestamp: Date.now(),
+      });
+    } catch (e) {
+      console.error('initTree error:', e);
+    } finally {
+      setSaving(false);
+    }
+  }, [treeId]);
 
-  // ── reset ─────────────────────────────────────────────────────────────────────
-  const reset = useCallback(() => {
-    lsClear(treeId);
-    nextId.current = makeIdGen(1);
-    setNodes([]);
-    setTreeName('Family Tree');
+  // ── addSpouse ────────────────────────────────────────────────────────────
+  const addSpouse = useCallback((personId, name) => {
+    applyUpdate(
+      map => {
+        const person = map[personId];
+        if (!person) return map;
+        const id = makeId();
+        map[id] = { id, name, gen: person.gen, spouseOf: personId, ancestorId: null, descendants: [], siblings: [], isYoungest: false };
+        return map;
+      },
+      { action: 'addSpouse', target: name, detail: `${editorRef.current.name} ne ${nodesMap[personId]?.name || 'kisi'} ki spouse ${name} add ki` }
+    );
+  }, [applyUpdate, nodesMap]);
+
+  // ── addSibling ───────────────────────────────────────────────────────────
+  const addSibling = useCallback((personId, name) => {
+    applyUpdate(
+      map => {
+        const person = map[personId];
+        if (!person) return map;
+        const id = makeId();
+        map[id] = { id, name, gen: person.gen, spouseOf: null, ancestorId: person.ancestorId, descendants: [], siblings: [personId, ...(person.siblings || [])], isYoungest: false };
+        map[personId] = { ...person, siblings: [...(person.siblings || []), id] };
+        if (person.ancestorId && map[person.ancestorId]) {
+          const parent = map[person.ancestorId];
+          map[person.ancestorId] = { ...parent, descendants: [...(parent.descendants || []), id] };
+        }
+        return map;
+      },
+      { action: 'addSibling', target: name, detail: `${editorRef.current.name} ne ${nodesMap[personId]?.name || 'kisi'} ka bhai/behen ${name} add kiya` }
+    );
+  }, [applyUpdate, nodesMap]);
+
+  // ── addChild ─────────────────────────────────────────────────────────────
+  const addChild = useCallback((personId, name) => {
+    applyUpdate(
+      map => {
+        const person = map[personId];
+        if (!person) return map;
+        const id = makeId();
+        map[id] = { id, name, gen: person.gen - 1, spouseOf: null, ancestorId: personId, descendants: [], siblings: [], isYoungest: false };
+        map[personId] = { ...person, descendants: [...(person.descendants || []), id] };
+        return map;
+      },
+      { action: 'addChild', target: name, detail: `${editorRef.current.name} ne ${nodesMap[personId]?.name || 'kisi'} ka bachcha ${name} add kiya` }
+    );
+  }, [applyUpdate, nodesMap]);
+
+  // ── addAncestor ──────────────────────────────────────────────────────────
+  const addAncestor = useCallback((personId, name) => {
+    applyUpdate(
+      map => {
+        const person = map[personId];
+        if (!person) return map;
+        const id = makeId();
+        map[id] = { id, name, gen: person.gen + 1, spouseOf: null, ancestorId: null, descendants: [personId], siblings: [], isYoungest: false };
+        map[personId] = { ...person, ancestorId: id };
+        return map;
+      },
+      { action: 'addAncestor', target: name, detail: `${editorRef.current.name} ne ${nodesMap[personId]?.name || 'kisi'} ke pita/mata ${name} add kiye` }
+    );
+  }, [applyUpdate, nodesMap]);
+
+  // ── renamePerson ─────────────────────────────────────────────────────────
+  const renamePerson = useCallback((id, newName) => {
+    applyUpdate(
+      map => { if (!map[id]) return map; map[id] = { ...map[id], name: newName }; return map; },
+      { action: 'renamePerson', target: newName, detail: `${editorRef.current.name} ne naam badla: "${nodesMap[id]?.name || id}" → "${newName}"` }
+    );
+  }, [applyUpdate, nodesMap]);
+
+  // ── deletePerson ─────────────────────────────────────────────────────────
+  const deletePerson = useCallback((id) => {
+    applyUpdate(
+      map => {
+        const toRemove = new Set();
+        const collect = (nodeId) => {
+          if (!map[nodeId] || toRemove.has(nodeId)) return;
+          toRemove.add(nodeId);
+          (map[nodeId].descendants || []).forEach(collect);
+          Object.values(map).forEach(n => { if (n.spouseOf === nodeId) toRemove.add(n.id); });
+        };
+        collect(id);
+        toRemove.forEach(rid => { delete map[rid]; });
+        Object.keys(map).forEach(k => {
+          map[k] = { ...map[k], descendants: (map[k].descendants || []).filter(d => !toRemove.has(d)), siblings: (map[k].siblings || []).filter(s => !toRemove.has(s)) };
+        });
+        return map;
+      },
+      { action: 'deletePerson', target: nodesMap[id]?.name || id, detail: `${editorRef.current.name} ne "${nodesMap[id]?.name || id}" delete kiya` }
+    );
+  }, [applyUpdate, nodesMap]);
+
+  // ── movePerson ────────────────────────────────────────────────────────────
+  const movePerson = useCallback((id, newParentId) => {
+    applyUpdate(
+      map => {
+        if (!map[id] || !map[newParentId]) return map;
+        const oldParentId = map[id].ancestorId;
+        if (oldParentId && map[oldParentId]) {
+          map[oldParentId] = { ...map[oldParentId], descendants: (map[oldParentId].descendants || []).filter(d => d !== id) };
+        }
+        map[newParentId] = { ...map[newParentId], descendants: [...(map[newParentId].descendants || []), id] };
+        map[id] = { ...map[id], ancestorId: newParentId, gen: map[newParentId].gen - 1 };
+        return map;
+      },
+      { action: 'movePerson', target: nodesMap[id]?.name || id, detail: `${editorRef.current.name} ne "${nodesMap[id]?.name || id}" ko "${nodesMap[newParentId]?.name || newParentId}" ke neeche move kiya` }
+    );
+  }, [applyUpdate, nodesMap]);
+
+  // ── saveRowOrder ─────────────────────────────────────────────────────────
+  const saveRowOrder = useCallback(async (order) => {
+    if (!treeId) return;
+    setRowOrder(order);
+    try { await updateDoc(treeDocRef(treeId), { rowOrder: order }); }
+    catch (e) { console.error('saveRowOrder error:', e); }
+  }, [treeId]);
+
+  // ── resetRowOrder ────────────────────────────────────────────────────────
+  const resetRowOrder = useCallback(async () => {
+    if (!treeId) return;
     setRowOrder(null);
-    rowOrderRef.current = null;
-    setInitDone(false);
-    if (treeId) saveTreeData(treeId, [], null).catch(console.error);
+    try { await updateDoc(treeDocRef(treeId), { rowOrder: null }); }
+    catch (e) { console.error('resetRowOrder error:', e); }
+  }, [treeId]);
+
+  // ── flushToFirestore ─────────────────────────────────────────────────────
+  const flushToFirestore = useCallback(async (order) => {
+    if (!treeId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaving(true);
+    try {
+      const payload = { nodes: nodesMap, updatedAt: serverTimestamp() };
+      if (order) payload.rowOrder = order;
+      await updateDoc(treeDocRef(treeId), payload);
+    } catch (e) {
+      console.error('flushToFirestore error:', e);
+    } finally {
+      setSaving(false);
+    }
+  }, [treeId, nodesMap]);
+
+  // ── reset ────────────────────────────────────────────────────────────────
+  const reset = useCallback(async () => {
+    if (!treeId) return;
+    setNodes([]); setNodesMap({});
+    setInitDone(false); setRowOrder(null);
+    historyRef.current = [];
+    futureRef.current  = [];
+    syncUndoRedoFlags();
+    try {
+      await updateDoc(treeDocRef(treeId), { nodes: {}, rowOrder: null, updatedAt: serverTimestamp() });
+      await appendLog(treeId, {
+        uid: editorRef.current.uid, name: editorRef.current.name,
+        action: 'reset', target: '',
+        detail: `${editorRef.current.name} ne poora tree reset kar diya`,
+        timestamp: Date.now(),
+      });
+    } catch (e) { console.error('reset error:', e); }
   }, [treeId]);
 
   return {
-    nodes, treeName, rowOrder, loading, saving, initDone,
-    initTree, addSpouse, addSibling, addChild, addAncestor,
-    saveRowOrder, resetRowOrder, reset,
-    flushToFirestore: () => persistFirestore(nodesRef.current, treeNameRef.current, rowOrderRef.current),
+    nodes, treeName, rowOrder, activityLog,
+    loading, saving, initDone,
+    canUndo, canRedo, undo, redo,
+    setEditor,
+    initTree,
+    addSpouse, addSibling, addChild, addAncestor,
+    renamePerson, deletePerson, movePerson,
+    saveRowOrder, resetRowOrder,
+    flushToFirestore, reset,
   };
 }

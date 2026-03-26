@@ -17,7 +17,7 @@ export default function LoginPage() {
   const auth            = getAuth();
   const { user, ready, refreshUser } = useAuth();
 
-  // Redirect already-logged-in users (page refresh / direct visit to /login)
+  // Redirect already-logged-in users
   useEffect(() => {
     if (!ready) return;
     if (user) navigate(user.familyId ? "/dashboard" : "/registration", { replace: true });
@@ -35,27 +35,49 @@ export default function LoginPage() {
   const run = async (fn) => {
     setBusy(true); setErr("");
     try   { await fn(); }
-    catch (e) { setErr(friendlyAuthError(e)); }  // clean error messages
+    catch (e) { setErr(friendlyAuthError(e)); }
     finally   { setBusy(false); }
   };
 
-  const loginEmail    = () => run(() => signInWithEmailAndPassword(auth, email, pass));
+  const loginEmail = () => run(() => signInWithEmailAndPassword(auth, email, pass));
 
   const registerEmail = () => run(async () => {
+    if (!mob || mob.replace(/\D/g, "").length < 10) {
+      throw new Error("Mobile number mandatory for registration.");
+    }
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    const full = mob ? toFullMobile(cc, mob) : "";
+    const full = toFullMobile(cc, mob);
     await ensureUser(cred.user, { displayName: name.trim(), mobile: full, countryCode: cc });
-    await refreshUser();  // mobile AuthContext માં update થાય — FamilyRegistrationFlow ને ફરી prompt નહીં આવે
+    await refreshUser();
     navigate("/registration", { replace: true });
   });
 
+  // ── Google login ────────────────────────────────────────────────────────────
+  // After Google login, mobile is NOT available from Google account.
+  // So we always go to /registration — FamilyRegistrationFlow will show
+  // MobilePromptSheet (mandatory) if user.mobile is null.
+  // If user already has familyId (returning user) → go to /dashboard directly.
   const loginGoogle = () => run(async () => {
     const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+
+    // ensureUser without mobile — mobile will be collected in MobilePromptSheet
     await ensureUser(cred.user);
-    // Check familyId from RTDB directly — AuthContext may not be updated yet
+
+    // Read fresh data from RTDB — AuthContext may not be updated yet
     const { getUser } = await import("../db/userDb");
     const userData = await getUser(cred.user.uid, cred.user.email);
-    navigate(userData?.familyId ? "/dashboard" : "/registration", { replace: true });
+
+    if (userData?.familyId) {
+      // Returning user — already registered
+      navigate("/dashboard", { replace: true });
+    } else if (userData?.mobile) {
+      // Has mobile but no family — go straight to registration (skip MobilePromptSheet)
+      navigate("/registration", { replace: true });
+    } else {
+      // New Google user — no mobile yet
+      // FamilyRegistrationFlow will show MobilePromptSheet (mandatory, no skip)
+      navigate("/registration", { replace: true });
+    }
   });
 
   const forgotPass = async () => {
@@ -88,7 +110,7 @@ export default function LoginPage() {
         className="w-full py-3.5 rounded-xl text-sm font-bold border-2 flex items-center justify-center gap-2 disabled:opacity-60"
         style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: "#fff" }}>
         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="G" />
-        Continue with Google (રજીસ્ટ્રેશન જરૂર નથી)
+        Continue with Google
       </button>
 
       <div className="flex items-center gap-3">
@@ -125,7 +147,7 @@ export default function LoginPage() {
             style={inputStyle} className={inputCls} />
           <div>
             <p className="text-xs font-semibold mb-1.5" style={{ color: COLORS.primary }}>
-              Mobile (Compulsory)
+              Mobile <span style={{ color: COLORS.error }}>*</span>
             </p>
             <MobileInput countryCode={cc} onCountryCodeChange={setCc}
               number={mob} onNumberChange={setMob} />

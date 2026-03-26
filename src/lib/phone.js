@@ -1,82 +1,102 @@
-// lib/phone.js — Single source of truth for all phone utilities.
-// normalizePhone.js is REMOVED — everything lives here.
+// lib/phone.js — Phone number utilities
 //
-// UNIFORM RULE — entire app:
-//   members/{id}/mobile     = "+919974021397"  fullMobile always
-//   users/{uid}/mobile      = "+919974021397"  fullMobile always
-//   mobileIndex KEY         = "+919974021397"  full number as key
-//   mobileIndex/countryCode = "+91"
+// ── ONE standard format used everywhere in this project ───────────────────────
+//
+//   Storage format:  +919974021397   (E.164 — plus + country code + number)
+//   Display format:  +91 9974021397  (with space after country code)
+//   RTDB key format: 919974021397    (no plus, no spaces)
+//
+// ALL phone numbers saved to Firestore / RTDB must go through toFullMobile()
+// before saving. This ensures invited[], treeEditors, users all match.
 
-import { COUNTRY_CODES } from "../constants/app";
+const DEFAULT_CC = '+91';
+
+// ─── Country code list ────────────────────────────────────────────────────────
+// Used by MobileInput dropdown
+export const COUNTRY_CODES = [
+  { code: '+91',  country: 'IN', name: 'India'         },
+  { code: '+1',   country: 'US', name: 'USA/Canada'    },
+  { code: '+44',  country: 'GB', name: 'UK'            },
+  { code: '+61',  country: 'AU', name: 'Australia'     },
+  { code: '+971', country: 'AE', name: 'UAE'           },
+  { code: '+65',  country: 'SG', name: 'Singapore'     },
+  { code: '+60',  country: 'MY', name: 'Malaysia'      },
+  { code: '+27',  country: 'ZA', name: 'South Africa'  },
+  { code: '+49',  country: 'DE', name: 'Germany'       },
+  { code: '+33',  country: 'FR', name: 'France'        },
+  { code: '+81',  country: 'JP', name: 'Japan'         },
+  { code: '+86',  country: 'CN', name: 'China'         },
+  { code: '+92',  country: 'PK', name: 'Pakistan'      },
+  { code: '+880', country: 'BD', name: 'Bangladesh'    },
+  { code: '+94',  country: 'LK', name: 'Sri Lanka'     },
+  { code: '+977', country: 'NP', name: 'Nepal'         },
+];
 
 /**
- * Build fullMobile from parts. Idempotent.
- * toFullMobile("+91", "9974021397")    → "+919974021397"
- * toFullMobile("+91", "+919974021397") → "+919974021397"
+ * toFullMobile — converts cc + number → standard E.164 storage string
+ *
+ * Examples:
+ *   toFullMobile('+91', '9974021397')  → '+919974021397'
+ *   toFullMobile('+1',  '4155552671')  → '+14155552671'
+ *   toFullMobile(null,  '9974021397')  → '+919974021397'  (uses DEFAULT_CC)
+ *
+ * Safe to call multiple times — won't double-add country code.
  */
-export function toFullMobile(countryCode, digits) {
-  const cc  = (countryCode || "+91").trim();
-  const raw = String(digits || "").replace(/\D/g, "");
-  if (!raw) return "";
-  const ccDigits = cc.replace("+", "");
-  const num = raw.startsWith(ccDigits) ? raw.slice(ccDigits.length) : raw;
-  return `${cc}${num.slice(-10)}`;
-}
+export function toFullMobile(countryCode, number) {
+  const cc  = (countryCode || DEFAULT_CC).trim();
+  const num = (number      || '').trim().replace(/\D/g, ''); // digits only
+  if (!num) return '';
 
-/**
- * Encode fullMobile for use as a Firebase RTDB key.
- * "+919974021397" → "+919974021397" (no change needed — + and digits are valid)
- */
-export function toMobileKey(fullMobile) {
-  if (!fullMobile) return "";
-  const s = String(fullMobile).trim();
-  return s.startsWith("+") ? s : `+91${s.replace(/\D/g, "").slice(-10)}`;
-}
+  const ccDigits = cc.replace(/\D/g, '');
 
-/**
- * Split fullMobile → { countryCode, digits }
- * splitMobile("+919974021397") → { countryCode: "+91", digits: "9974021397" }
- */
-export function splitMobile(fullMobile) {
-  if (!fullMobile) return { countryCode: "+91", digits: "" };
-  const s = String(fullMobile).trim();
-  if (!s.startsWith("+")) {
-    return { countryCode: "+91", digits: s.replace(/\D/g, "").slice(-10) };
+  // Already has country code prefixed → don't add again
+  if (num.startsWith(ccDigits) && num.length > 10) {
+    return `+${num}`;
   }
-  const sorted = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length);
-  for (const { code } of sorted) {
-    if (s.startsWith(code)) {
-      return { countryCode: code, digits: s.slice(code.length) };
+
+  return `${cc}${num}`;  // e.g. '+91' + '9974021397' = '+919974021397'
+}
+
+/**
+ * toMobileKey — converts full mobile to RTDB-safe key (no + or spaces)
+ *
+ * Example:
+ *   toMobileKey('+919974021397') → '919974021397'
+ */
+export function toMobileKey(phone) {
+  return (phone || '').replace(/\+/g, '').replace(/\s/g, '').trim();
+}
+
+/**
+ * splitMobile — splits a stored full mobile back into { cc, number }
+ * Useful for pre-filling the MobileInput from a saved value.
+ *
+ * Example:
+ *   splitMobile('+919974021397') → { cc: '+91', number: '9974021397' }
+ *   splitMobile('+14155552671')  → { cc: '+1',  number: '4155552671' }
+ */
+export function splitMobile(fullPhone) {
+  if (!fullPhone) return { cc: DEFAULT_CC, number: '' };
+
+  const known = COUNTRY_CODES.map(c => c.code).sort((a, b) => b.length - a.length);
+  for (const cc of known) {
+    if (fullPhone.startsWith(cc)) {
+      return { cc, number: fullPhone.slice(cc.length) };
     }
   }
-  return { countryCode: "+91", digits: s.replace(/\D/g, "").slice(-10) };
+  return { cc: DEFAULT_CC, number: fullPhone.replace(/^\+/, '') };
 }
 
 /**
- * Normalize any raw phone input to clean 10-digit string.
- * Handles +91, 91, 0091 prefixes.
- * normalizeMobile("919974021397") → "9974021397"
+ * generatePin — random 4-digit PIN string
  */
-export function normalizeMobile(mobile) {
-  if (!mobile) return "";
-  return String(mobile).trim().replace(/\D/g, "").slice(-10);
-}
-
-/** Validate Indian mobile digits (10 digits, starts 6-9) */
-export function isValidIndianMobile(digits) {
-  return /^[6-9]\d{9}$/.test(String(digits || ""));
+export function generatePin() {
+  return String(Math.floor(1000 + Math.random() * 9000));
 }
 
 /**
- * Parse raw phone string from contact picker.
- * "+919974021397" → { countryCode: "+91", digits: "9974021397" }
- * "9974021397"    → { countryCode: "+91", digits: "9974021397" }
+ * generateTreeId — random 6-char uppercase alphanumeric
  */
-export function parseRawPhone(raw) {
-  if (!raw) return { countryCode: "+91", digits: "" };
-  const cleaned = raw.replace(/[\s\-().]/g, "");
-  const full    = cleaned.startsWith("+")
-    ? cleaned
-    : `+91${cleaned.replace(/\D/g, "").slice(-10)}`;
-  return splitMobile(full);
+export function generateTreeId() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
 }

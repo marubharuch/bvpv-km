@@ -1,7 +1,7 @@
 // constants/app.js — Single source of truth for all app-wide constants.
 
-export const APP_NAME    = "વિશા ઓશવાળ જૈન કેળવણી મંડળ-2";
-export const APP_TAGLINE = "બોરસદ – વાલવોડ – પાદરા – વટાદરા";
+export const APP_NAME    = "વંશ વૃક્ષ";
+export const APP_TAGLINE = "ચાલો પરિવારને ઓળખીએ";
 export const APP_URL     = "https://bvpv-km.web.app/";
 
 export const COLORS = {
@@ -23,6 +23,11 @@ export const GRADIENTS = {
   header: "linear-gradient(135deg, #5A1020 0%, #7B1C2E 50%, #9B2335 100%)",
   gold:   "linear-gradient(90deg, #C9A84C, #F0D080)",
 };
+
+// Fallback country code — used ONLY when a phone number has no country code prefix.
+// e.g. contact picker returns "9974021397" with no "+" → assumed to be India.
+// Numbers that already have a country code (e.g. "+971...") are never touched.
+export const DEFAULT_COUNTRY_CODE = "+91";
 
 export const COUNTRY_CODES = [
   { code: "+91",  flag: "🇮🇳", name: "India"     },

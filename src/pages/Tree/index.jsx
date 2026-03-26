@@ -1,50 +1,122 @@
 // pages/Tree/index.jsx
-// Guest / Editor page — /tree/:treeId
+// Guest / Invited member entry point — /tree/:treeId
 //
-// Auth check sequence (mount par):
-//   1. Firebase Auth → currentUser hai?
-//   2. Haan → treesByUid check → creator hai? → seedha edit
-//   3. Haan → treeEditors check → verified editor hai? → seedha edit
-//   4. Nahi / unknown → view only, "Edit karo" button → PIN screen
+// ── New Flow ──────────────────────────────────────────────────────────────────
+//
+//   1. Page loads → show tree in READ-ONLY behind a blurred overlay
+//   2. Overlay immediately shows PIN entry popup (no "Edit karo" button needed)
+//   3. If already a verified/registered user → skip popup, go straight to edit
+//   4. PIN verified → look up name from invited[] list
+//   5. Show registration popup (Google / Email / Anonymous)
+//   6. After auth → full edit access, overlay gone
+//
+// ── Auth check on load ────────────────────────────────────────────────────────
+//   - Firebase Auth currentUser exists?
+//     → Creator?       → skip everything, full edit
+//     → Verified editor (has mobile in RTDB)? → skip everything, full edit
+//   - Not logged in / unknown → show PIN popup immediately
 
 import { useState, useEffect }  from 'react';
-import { useParams }             from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { getAuth }               from 'firebase/auth';
-import { getTree, verifyPinAndSaveEditor, isVerifiedEditor,
-         getTreesByUid }         from '../../db/treeDb';
+import {
+  getTree, verifyPinAndSaveEditor, isVerifiedEditor,
+  getTreesByUid, getInvitedName,
+}                                from '../../db/treeDb';
+import {
+  validateInvite, markInviteUsed, checkLockout, recordFailedAttempt, clearFailedAttempts,
+}                                from '../../db/inviteDb';
 import { rtdb }                  from '../../db/rtdb';
 import { toMobileKey, toFullMobile } from '../../lib/phone';
-import JoinDirectory             from '../JoinDirectory';
+import JoinDirectory             from './JoinDirectory';
 import FamilyTree                from '../FamilyTree/index';
 import MobileInput               from '../../components/ui/MobileInput';
 
 const C = {
-  maroon:'#6b1f1f', gold:'#c4993a', border:'#d6c99a',
-  cream:'#fefcf5', bg:'#f9f5e7', muted:'#9c7c5a',
+  maroon: '#6b1f1f', gold: '#c4993a', border: '#d6c99a',
+  cream: '#fefcf5', bg: '#f9f5e7', muted: '#9c7c5a',
 };
 
-// ── PIN Entry Screen ──────────────────────────────────────────────────────────
-function PinEntry({ treeId, treeName, onVerified, onSkip }) {
+const labelSt = {
+  fontSize: 11, fontWeight: 700, color: C.gold,
+  textTransform: 'uppercase', letterSpacing: '1px',
+  display: 'block', marginBottom: 6,
+};
+
+// ── PIN Entry Popup ───────────────────────────────────────────────────────────
+// ipin = 6-digit one-time invite PIN from WhatsApp link (?ipin=XXXXXX)
+// Each invite has its own PIN — cannot be reused by another person.
+//
+// Flow:
+//   1. ipin pre-filled from URL — user just enters their mobile
+//   2. validateInvite(ipin) → checks not expired, not used, phone matches
+//   3. markInviteUsed(ipin, uid) → PIN retired, nobody else can use it
+//   4. verifyPinAndSaveEditor() → saved as editor in RTDB
+
+function PinPopup({ tree, urlIpin, onVerified }) {
   const [phone,   setPhone]   = useState('');
   const [cc,      setCc]      = useState('+91');
-  const [pin,     setPin]     = useState('');
+  // ipin = the 6-digit one-time invite PIN
+  const [ipin,    setIpin]    = useState(urlIpin || '');
   const [loading, setLoading] = useState(false);
   const [err,     setErr]     = useState('');
 
+  // Device ID for brute-force protection
+  const deviceId = (() => {
+    try {
+      let id = localStorage.getItem('_did');
+      if (!id) { id = Math.random().toString(36).slice(2); localStorage.setItem('_did', id); }
+      return id;
+    } catch { return 'unknown'; }
+  })();
+
   const handleVerify = async () => {
-    if (!phone.trim()) { setErr('Apna mobile number daalo'); return; }
-    if (pin.length !== 4) { setErr('4 digit PIN daalo'); return; }
+    if (!phone.trim())       { setErr('Apna mobile number daalo'); return; }
+    if (ipin.length !== 6)   { setErr('6 digit PIN daalo'); return; }
     setLoading(true); setErr('');
     try {
       const fullPhone = toFullMobile(cc, phone);
-      const already   = await isVerifiedEditor(treeId, fullPhone);
-      if (already) { onVerified(fullPhone); return; }
-      const result = await verifyPinAndSaveEditor(treeId, pin, fullPhone);
-      if (result.ok) {
-        onVerified(fullPhone);
-      } else {
-        setErr(result.reason === 'wrong_pin' ? 'Galat PIN hai' : 'Kuch problem aayi');
+
+      // Brute-force check
+      const lockout = await checkLockout(deviceId);
+      if (lockout.locked) {
+        const mins = Math.ceil((lockout.lockedUntil - Date.now()) / 60000);
+        setErr(`Bahut zyada galat try. ${mins} minute baad dobara try karo.`);
+        return;
       }
+
+      // Already verified before? Skip PIN check
+      const already = await isVerifiedEditor(tree.id, fullPhone);
+      if (already) {
+        onVerified(fullPhone, '');
+        return;
+      }
+
+      // Validate one-time invite PIN
+      const { valid, reason, invite } = await validateInvite(ipin);
+      if (!valid) {
+        await recordFailedAttempt(deviceId);
+        if (reason === 'not_found')  { setErr('Yeh PIN valid nahi hai. WhatsApp message se PIN copy karo.'); return; }
+        if (reason === 'expired')    { setErr('Yeh invite expire ho gaya. Admin se naya link maango.'); return; }
+        if (reason === 'used_up')    { setErr('Yeh PIN pehle hi use ho chuka hai. Admin se naya link maango.'); return; }
+        setErr('PIN invalid hai. Dobara try karo.');
+        return;
+      }
+
+      // Phone must match what admin saved — security check
+      if (invite.phone && invite.phone !== fullPhone) {
+        await recordFailedAttempt(deviceId);
+        setErr('Yeh PIN is number ke liye nahi hai. Sahi number daalo.');
+        return;
+      }
+
+      // All good — save as verified editor
+      await verifyPinAndSaveEditor(tree.id, tree.pin, fullPhone);
+      await markInviteUsed(ipin, null);   // retire PIN immediately
+      await clearFailedAttempts(deviceId);
+
+      onVerified(fullPhone, invite.name || '');
+
     } catch (e) {
       setErr('Network error. Dobara try karo.');
       console.error(e);
@@ -54,144 +126,163 @@ function PinEntry({ treeId, treeName, onVerified, onSkip }) {
   };
 
   return (
-    <div style={{position:'fixed',inset:0,zIndex:200,
-      background:'rgba(60,15,15,0.8)',backdropFilter:'blur(6px)',
-      display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-      <div style={{background:C.cream,border:`2px solid ${C.gold}`,
-        borderRadius:12,padding:'32px 24px',maxWidth:380,width:'100%',
-        boxShadow:'0 24px 64px rgba(60,15,15,0.4)'}}>
-        <div style={{textAlign:'center',marginBottom:20}}>
-          <div style={{fontSize:40}}>🔑</div>
-          <h2 style={{fontFamily:"'DM Serif Display',serif",fontSize:20,
-            color:C.maroon,margin:'8px 0 4px'}}>
-            Edit karna chahte ho?
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 300,
+      background: 'rgba(60,15,15,0.75)', backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div style={{
+        background: C.cream, border: `2px solid ${C.gold}`,
+        borderRadius: 16, padding: '32px 24px',
+        maxWidth: 380, width: '100%',
+        boxShadow: '0 24px 64px rgba(60,15,15,0.45)',
+      }}>
+
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div style={{ fontSize: 44 }}>🌳</div>
+          <h2 style={{
+            fontFamily: "'DM Serif Display', serif", fontSize: 20,
+            color: C.maroon, margin: '8px 0 4px',
+          }}>
+            {tree.treeName}
           </h2>
-          <p style={{fontSize:12,color:C.muted}}>
-            {treeName} — PIN daalo jo creator ne bheja tha
+          <p style={{ fontSize: 12, color: C.muted, margin: 0 }}>
+            Aapko is family tree mein invite kiya gaya hai.
+            <br />Apna number aur PIN daalo.
           </p>
         </div>
 
         <label style={labelSt}>Aapka Mobile Number</label>
-        <MobileInput value={phone} onChange={setPhone}
+        <MobileInput
+          value={phone} onChange={setPhone}
           countryCode={cc} onCountryCodeChange={setCc}
           placeholder="Mobile number"
-          style={{marginBottom:14}}/>
+          style={{ marginBottom: 14 }}
+        />
 
-        <label style={labelSt}>PIN (4 digits)</label>
-        <input type="number" value={pin}
-          onChange={e=>setPin(e.target.value.slice(0,4))}
-          placeholder="1234"
-          style={{width:'100%',padding:'12px',borderRadius:8,
-            border:`1.5px solid ${C.border}`,fontSize:24,
-            textAlign:'center',letterSpacing:8,fontWeight:700,
-            background:C.bg,marginBottom:14}}/>
+        <label style={labelSt}>PIN (6 digits — WhatsApp message mein tha)</label>
+        <input
+          type="number" value={ipin}
+          onChange={e => setIpin(e.target.value.slice(0, 6))}
+          onKeyDown={e => e.key === 'Enter' && handleVerify()}
+          placeholder="123456"
+          style={{
+            width: '100%', padding: '13px', borderRadius: 8,
+            border: `1.5px solid ${urlIpin ? '#a5d6a7' : C.border}`, fontSize: 26,
+            textAlign: 'center', letterSpacing: 8, fontWeight: 700,
+            background: urlIpin ? '#e8f5e9' : C.bg, marginBottom: 14, outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+        {urlIpin && (
+          <p style={{ fontSize: 11, color: '#2e7d32', textAlign: 'center', marginTop: -10, marginBottom: 12 }}>
+            ✓ PIN auto-filled from your invite link
+          </p>
+        )}
 
-        {err && <div style={{color:'#c0392b',fontSize:12,
-          marginBottom:10,textAlign:'center'}}>{err}</div>}
+        {err && (
+          <div style={{
+            color: '#c0392b', fontSize: 12,
+            marginBottom: 12, textAlign: 'center',
+            padding: '8px 12px', background: '#ffeaea', borderRadius: 7,
+          }}>{err}</div>
+        )}
 
-        <button onClick={handleVerify} disabled={loading}
-          style={{width:'100%',padding:12,borderRadius:8,border:'none',
-            background:C.maroon,color:'#fff',fontWeight:700,
-            fontSize:14,cursor:'pointer',marginBottom:10}}>
-          {loading ? 'Verify ho raha hai…' : '✓ PIN Verify karo'}
+        <button onClick={handleVerify} disabled={loading} style={{
+          width: '100%', padding: 13, borderRadius: 10, border: 'none',
+          background: C.maroon, color: '#fff', fontWeight: 700,
+          fontSize: 15, cursor: loading ? 'wait' : 'pointer',
+        }}>
+          {loading ? 'Verify ho raha hai…' : '✓ Continue karo'}
         </button>
-        <button onClick={onSkip}
-          style={{width:'100%',padding:10,borderRadius:8,
-            border:`1px solid ${C.border}`,background:'transparent',
-            color:C.muted,fontSize:13,cursor:'pointer'}}>
-          Sirf dekhna hai (View Only)
-        </button>
+
+        <p style={{ fontSize: 11, color: C.muted, textAlign: 'center', marginTop: 12 }}>
+          PIN aapke WhatsApp message mein tha
+        </p>
       </div>
     </div>
   );
 }
 
-const labelSt = {
-  fontSize:11,fontWeight:700,color:C.gold,
-  textTransform:'uppercase',letterSpacing:'1px',
-  display:'block',marginBottom:6,
-};
+// ── Main Page ─────────────────────────────────────────────────────────────────
 
-// ── Main Tree Guest Page ──────────────────────────────────────────────────────
 export default function TreeGuestPage() {
   const { treeId } = useParams();
+  const [searchParams] = useSearchParams();
+  const urlIpin = searchParams.get('ipin') || '';
 
   const [tree,        setTree]        = useState(null);
-  const [loading,     setLoading]     = useState(true);  // tree + auth check
+  const [loading,     setLoading]     = useState(true);
   const [notFound,    setNotFound]    = useState(false);
-  const [showPin,     setShowPin]     = useState(false);
+
+  // Access control
   const [canEdit,     setCanEdit]     = useState(false);
   const [isCreator,   setIsCreator]   = useState(false);
+
+  // Popup visibility
+  const [showPin,     setShowPin]     = useState(false);   // PIN popup
+  const [showJoin,    setShowJoin]    = useState(false);   // Registration popup
+
+  // Verified person details (set after PIN verified)
   const [editorPhone, setEditorPhone] = useState('');
   const [editorName,  setEditorName]  = useState('');
-  const [isUser,      setIsUser]      = useState(false);
-  const [showJoin,    setShowJoin]    = useState(false);
+  const [isUser,      setIsUser]      = useState(false);   // has Firebase Auth account?
+  const [editorUid,   setEditorUid]   = useState('');
 
+  // ── On mount: load tree + check auth ──────────────────────────────────────
   useEffect(() => {
     if (!treeId) return;
 
     const init = async () => {
       try {
-        // 1. Tree load karo
+        // 1. Load tree metadata
         const data = await getTree(treeId);
         if (!data) { setNotFound(true); return; }
         setTree(data);
 
-        // 2. Firebase Auth — currentUser check
+        // 2. Check Firebase Auth
         const auth        = getAuth();
         const currentUser = auth.currentUser;
-        console.log('🔍 currentUser:', currentUser?.uid, currentUser?.email);
 
         if (!currentUser) {
-          // Logged out — view only
+          // Not logged in → show PIN popup immediately
+          setShowPin(true);
           return;
         }
 
         const uid = currentUser.uid;
 
-        // 3. Creator check — treesByUid mein yeh treeId hai?
-        console.log('🔍 checking treesByUid for uid:', uid);
+        // 3. Creator check
         const myTrees = await getTreesByUid(uid);
-        console.log('🔍 myTrees:', myTrees);
         if (myTrees[treeId]) {
-          // Creator hai — seedha edit
           setCanEdit(true);
           setIsCreator(true);
           setIsUser(true);
+          setEditorUid(uid);
           return;
         }
 
-        // 4. Verified editor check — RTDB treeEditors mein uid dhundho
-        // User ka phone RTDB users/{uid}/mobile se milega
-        console.log('🔍 checking RTDB users/', uid);
+        // 4. Already a verified editor with registered account?
         const userData = await rtdb.get(`users/${uid}`);
-        console.log('🔍 userData:', userData);
         if (userData?.mobile) {
-          const phone     = userData.mobile;
-          const mobileKey = toMobileKey(phone);
-          const editorData = await rtdb.get(
-            `treeEditors/${treeId}/${mobileKey}`
-          );
-
+          const mobileKey  = toMobileKey(userData.mobile);
+          const editorData = await rtdb.get(`treeEditors/${treeId}/${mobileKey}`);
           if (editorData) {
-            // Verified editor — seedha edit
             setCanEdit(true);
-            setEditorPhone(phone);
+            setEditorPhone(userData.mobile);
             setEditorName(editorData.name || userData.displayName || '');
-            setIsUser(!!editorData.isUser);
-            // Agar user nahi bana abhi tak — join prompt dikhao
-            if (!editorData.isUser) {
-              setTimeout(() => setShowJoin(true), 800);
-            }
+            setEditorUid(uid);
+            setIsUser(true);
             return;
           }
         }
 
-        // 5. Logged in hai but is tree ka editor nahi — view only
-        // (PIN se join kar sakta hai)
+        // 5. Logged in but not a verified editor → show PIN popup
+        setShowPin(true);
 
       } catch (e) {
-        console.error('Tree init error:', e);
+        console.error('TreeGuestPage init error:', e);
+        setShowPin(true); // fallback — show PIN
       } finally {
         setLoading(false);
       }
@@ -200,35 +291,49 @@ export default function TreeGuestPage() {
     init();
   }, [treeId]);
 
-  // PIN verified callback
-  const handlePinVerified = (phone) => {
-    setCanEdit(true);
-    setShowPin(false);
+  // ── PIN verified callback ──────────────────────────────────────────────────
+  // Called by PinPopup after phone+PIN accepted.
+  // phone = full mobile, name = from invited[] list (may be '')
+  const handlePinVerified = (phone, name) => {
     setEditorPhone(phone);
-    // Invited list mein naam dhundho
-    const match = (tree?.invited || []).find(i => i.phone === phone);
-    if (match?.name) setEditorName(match.name);
-    // Join directory prompt
-    setTimeout(() => setShowJoin(true), 800);
+    setEditorName(name);
+    setShowPin(false);
+    // Give edit access immediately
+    setCanEdit(true);
+    // Show registration popup (Google / Email / Anonymous)
+    setShowJoin(true);
   };
 
+  // ── Registration complete callback ─────────────────────────────────────────
+  const handleJoinSuccess = ({ uid, name }) => {
+    setShowJoin(false);
+    setIsUser(true);
+    if (name) setEditorName(name);
+  };
+
+  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) return (
-    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',
-      justifyContent:'center',background:C.bg,
-      fontFamily:"'DM Sans',sans-serif",color:C.muted}}>
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', background: C.bg,
+      fontFamily: "'DM Sans', sans-serif", color: C.muted,
+    }}>
       Loading…
     </div>
   );
 
+  // ── Tree not found ─────────────────────────────────────────────────────────
   if (notFound) return (
-    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',
-      alignItems:'center',justifyContent:'center',background:C.bg,
-      fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{fontSize:48}}>🌳</div>
-      <h2 style={{color:C.maroon,fontFamily:"'DM Serif Display',serif"}}>
+    <div style={{
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: C.bg, fontFamily: "'DM Sans', sans-serif",
+    }}>
+      <div style={{ fontSize: 48 }}>🌳</div>
+      <h2 style={{ color: C.maroon, fontFamily: "'DM Serif Display', serif" }}>
         Tree nahi mila
       </h2>
-      <p style={{color:C.muted,fontSize:13}}>
+      <p style={{ color: C.muted, fontSize: 13 }}>
         Tree ID "{treeId}" exist nahi karta.
       </p>
     </div>
@@ -236,37 +341,36 @@ export default function TreeGuestPage() {
 
   return (
     <>
-      {/* PIN dialog */}
-      {showPin && (
-        <PinEntry
-          treeId={treeId}
-          treeName={tree.treeName}
+      {/* PIN popup — shown immediately for unrecognised visitors */}
+      {showPin && tree && (
+        <PinPopup
+          tree={tree}
+          urlIpin={urlIpin}
           onVerified={handlePinVerified}
-          onSkip={() => setShowPin(false)}
         />
       )}
 
-      {/* Join Directory dialog — sirf non-users ke liye */}
+      {/* Registration popup — shown after PIN verified */}
       {showJoin && !isUser && (
         <JoinDirectory
           treeId={treeId}
           phone={editorPhone}
           name={editorName}
-          onSuccess={({ uid, name }) => {
-            setShowJoin(false);
-            setIsUser(true);
-            setEditorName(name);
-          }}
+          onSuccess={handleJoinSuccess}
           onSkip={() => setShowJoin(false)}
         />
       )}
 
-      {/* FamilyTree */}
+      {/* Family tree — always rendered, read-only until verified */}
       <FamilyTree
         treeId={treeId}
+        pin={tree?.pin}
         isCreator={isCreator}
         readOnly={!canEdit}
-        onRequestEdit={canEdit ? null : () => setShowPin(true)}
+        onRequestEdit={null}
+        editorName={editorName}
+        editorPhone={editorPhone}
+        editorUid={editorUid}
       />
     </>
   );
