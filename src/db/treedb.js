@@ -48,10 +48,17 @@ export async function createTree(uid, treeName) {
     rowOrder:  null,
   });
 
-  await rtdb.set(`userTrees/${uid}/${treeId}`, {
-    treeName:  treeName || 'My Family Tree',
-    pin,
-    createdAt: Date.now(),
+  // RTDB mein tree + admin role ek saath set karo
+  await rtdb.batch({
+    [`userTrees/${uid}/${treeId}`]: {
+      treeName:  treeName || 'My Family Tree',
+      pin,
+      createdAt: Date.now(),
+    },
+    [`users/${uid}/role`]:     'admin',
+    [`users/${uid}/familyId`]: treeId,
+    [`users/${uid}/status`]:   'active',
+    [`users/${uid}/updatedAt`]: Date.now(),
   });
 
   return { treeId, pin };

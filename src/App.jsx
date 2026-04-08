@@ -1,4 +1,14 @@
 // App.jsx — All routes defined here. One place, easy to scan.
+//
+// ── Routing Logic ────────────────────────────────────────────────────────────
+//  /              → Home (public — login વગર)
+//  /join?token=   → JoinPage — Mobile + PIN screen (WhatsApp invite link)
+//  /tree          → TreeWrapper — Anonymous/logged-in user ને table view
+//  /tree/:treeId  → TreeGuestPage — specific tree (invite link)
+//  /login         → LoginPage (full login)
+//  બધા private    → login નથી? → /tree redirect  |  anonymous? → /tree redirect
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense }          from "react";
 import { AuthProvider, useAuth }   from "./store/AuthContext";
@@ -20,6 +30,7 @@ const LeaderboardPage        = lazy(() => import("./pages/LeaderboardPage"));
 const RegisterList           = lazy(() => import("./pages/RegisterList"));
 const ConnectorsPage         = lazy(() => import("./pages/ConnectorsPage"));
 const OnboardingPage         = lazy(() => import("./pages/OnboardingPage"));
+const JoinPage               = lazy(() => import("./pages/JoinPage"));        // ← NEW: WhatsApp invite
 
 const RegistrationSuccess    = lazy(() => import("./pages/RegistrationSuccess"));
 const DashboardPage          = lazy(() => import("./pages/DashboardPage/index"));
@@ -33,7 +44,7 @@ const QuizGame     = lazy(() => import("./pages/Games/Quiz/index"));
 
 
 function AppRoutes() {
-  const { ready } = useAuth();
+  const { user, ready } = useAuth();
   if (!ready) return <Spinner message="Loading…" />;
 
   return (
@@ -71,10 +82,27 @@ function AppRoutes() {
         </Route>
 
         {/* ── Without AppLayout (full screen — no navbar) ── */}
-        {/* /tree/:treeId — main entry for WhatsApp invite links */}
-        {/* PIN popup is shown inline on this page — no separate /join route needed */}
-        <Route path="/tree"          element={<PrivateRoute><TreeWrapper /></PrivateRoute>} />
-        <Route path="/tree/:treeId"  element={<TreeGuestPage />} />
+
+        {/* /join?token=TREEID_PIN — WhatsApp invite link → Mobile+PIN screen */}
+        <Route path="/join" element={<JoinPage />} />
+
+        {/* /tree — Anonymous અથવા logged-in user → TreeWrapper (table view) */}
+        {/* Login નહીં? → /tree (public access with PIN)                       */}
+        {/* Anonymous login? → /tree (same)                                    */}
+        {/* Proper login + familyId? → TreeWrapper full access                 */}
+        <Route
+          path="/tree"
+          element={
+            !user
+              ? <TreeWrapper />                        // not logged in — show tree with PIN
+              : user.isAnonymous
+                ? <TreeWrapper />                      // anonymous — show tree
+                : <PrivateRoute><TreeWrapper /></PrivateRoute>  // full user — private
+          }
+        />
+
+        {/* /tree/:treeId — specific tree via invite link */}
+        <Route path="/tree/:treeId" element={<TreeGuestPage />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

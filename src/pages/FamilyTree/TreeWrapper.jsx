@@ -14,11 +14,15 @@ import { useState, useEffect } from 'react';
 import { useAuth }             from '../../store/AuthContext';
 import { getTreesByUid }       from '../../db/treeDb';
 import FamilyTree              from './index';
+import { useNavigate }         from 'react-router-dom';
 
 const C = {
   maroon:'#6b1f1f', gold:'#c4993a', border:'#d6c99a',
   cream:'#fefcf5', bg:'#f9f5e7', muted:'#9c7c5a',
 };
+
+// Admin WhatsApp — same as Home.jsx
+const ADMIN_WA_TREE = `https://wa.me/919974021397?text=${encodeURIComponent("નમસ્તે, મારે Family Tree નો access જોઈએ છે. Invite link મોકલશો?")}`;
 
 // ── No tree screen ─────────────────────────────────────────────────────────────
 function NoTreeScreen() {
@@ -30,23 +34,39 @@ function NoTreeScreen() {
       <div style={{fontSize:56,marginBottom:16}}>🌳</div>
       <h2 style={{fontFamily:"'DM Serif Display',serif",fontSize:22,
         color:C.maroon,marginBottom:10,fontWeight:400}}>
-        Koi Vansh Vriksha nahi mila
+        કોઈ Family Tree મળ્યું નહીં
       </h2>
       <p style={{fontSize:14,color:C.muted,lineHeight:1.7,
         maxWidth:300,marginBottom:28}}>
-        Aapko kisi ne abhi tak invite nahi kiya.
-        Admin se WhatsApp par invite link mangao.
+        તમને હજી invite મળ્યું નથી.
+        <br/>Admin ને WhatsApp કરો — invite link મળશે.
       </p>
+      <a
+        href={ADMIN_WA_TREE}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display:'flex',alignItems:'center',justifyContent:'center',
+          gap:10,width:'100%',maxWidth:320,padding:'14px 0',
+          borderRadius:12,border:'none',
+          background:'#25D366',color:'#fff',
+          fontSize:15,fontWeight:700,
+          cursor:'pointer',textDecoration:'none',
+        }}
+      >
+        <span style={{fontSize:20}}>💬</span>
+        Admin ને WhatsApp કરો
+      </a>
       <div style={{background:'#fff',border:`1.5px solid ${C.border}`,
         borderRadius:12,padding:'16px 20px',maxWidth:320,width:'100%',
-        fontSize:13,color:C.muted,lineHeight:1.7,textAlign:'left'}}>
+        fontSize:13,color:C.muted,lineHeight:1.8,textAlign:'left',marginTop:20}}>
         <div style={{fontWeight:700,color:C.maroon,marginBottom:8}}>
-          📲 Kaise join karein?
+          📲 Invite મળ્યા પછી:
         </div>
-        <div>1. Admin se WhatsApp par link maango</div>
-        <div>2. Link kholo — tree dikhega</div>
-        <div>3. Apna mobile number aur PIN daalo</div>
-        <div>4. Edit karo ya register karo</div>
+        <div>1. WhatsApp link ખોલો</div>
+        <div>2. Mobile number + PIN નાખો</div>
+        <div>3. Tree જુઓ અને edit કરો</div>
+        <div>4. Register કરો — permanent access</div>
       </div>
     </div>
   );
@@ -92,9 +112,73 @@ function TreeList({ trees, onSelect }) {
   );
 }
 
+// ── Not logged in — invite link ke bina /tree khola ──────────────────────────
+function GuestPinEntry() {
+  const navigate = useNavigate();
+
+  return (
+    <div style={{
+      minHeight:'100vh', background:C.bg,
+      fontFamily:"'DM Sans',sans-serif",
+      display:'flex', alignItems:'center',
+      justifyContent:'center', padding:24,
+    }}>
+      <div style={{
+        background:'#fefcf5', border:`2px solid ${C.gold}`,
+        borderRadius:16, padding:'36px 24px',
+        maxWidth:380, width:'100%',
+        boxShadow:'0 24px 64px rgba(60,15,15,0.18)',
+        textAlign:'center',
+      }}>
+        <div style={{fontSize:52, marginBottom:8}}>🌳</div>
+        <h2 style={{
+          fontFamily:"'DM Serif Display',serif", fontSize:20,
+          color:C.maroon, margin:'0 0 10px',
+        }}>
+          Family Tree
+        </h2>
+        <p style={{fontSize:13, color:C.muted, marginBottom:28, lineHeight:1.7}}>
+          Tree જોવા માટે WhatsApp invite link જોઈએ.
+          <br/>Admin પાસેથી invite link મેળવો.
+        </p>
+
+        <a
+          href={ADMIN_WA_TREE}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display:'flex', alignItems:'center', justifyContent:'center',
+            gap:10, width:'100%', padding:'13px 0',
+            borderRadius:10, border:'none',
+            background:'#25D366', color:'#fff',
+            fontSize:14, fontWeight:700,
+            cursor:'pointer', textDecoration:'none',
+            marginBottom:12, boxSizing:'border-box',
+          }}
+        >
+          <span style={{fontSize:18}}>💬</span>
+          Admin ને WhatsApp કરો
+        </a>
+
+        <button
+          onClick={() => navigate('/login')}
+          style={{
+            width:'100%', padding:11, borderRadius:10,
+            border:`1px solid ${C.border}`, background:'transparent',
+            color:C.muted, fontSize:13, cursor:'pointer',
+          }}
+        >
+          Login કરો
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main TreeWrapper ───────────────────────────────────────────────────────────
 export default function TreeWrapper() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [myTrees,   setMyTrees]   = useState(null);  // null = loading
   const [activeTid, setActiveTid] = useState(null);
   const [activePin, setActivePin] = useState(null);
@@ -160,6 +244,9 @@ export default function TreeWrapper() {
       })
       .catch(console.error);
   }, [user?.uid]);
+
+  // Login નથી → Tree ID + PIN entry screen
+  if (!user?.uid) return <GuestPinEntry />;
 
   // Loading
   if (myTrees === null) return (
